@@ -1,6 +1,6 @@
 # Đề xuất kiến trúc CDP: add-on cho Dental ERP (Odoo 17) và DMAG
 
-> Phiên bản: 0.4 · Ngày: 13/10/2026
+> Phiên bản: 0.5 · Ngày: 13/10/2026
 >
 > Lịch sử thay đổi:
 > - **0.1**: module Odoo hay platform riêng.
@@ -13,6 +13,22 @@
 >   - Code thuộc DMAG.
 >   - Web bán khóa học là eLearning trên Odoo của DMAG.
 >   - Thêm data contract v1 (xem [`data-contract-v1.md`](data-contract-v1.md)).
+> - **0.5**:
+>   - Thêm nhật ký quyết định (mục 0).
+>   - Thêm mô hình triển khai SaaS / Dedicated (mục 3.8).
+>   - Thêm checklist điều khoản hợp đồng với Bizapp (xem [`dieu-khoan-hop-dong-bizapp.md`](dieu-khoan-hop-dong-bizapp.md)).
+
+## 0. Nhật ký quyết định
+
+| # | Quyết định | Ngày |
+|---|-----------|------|
+| D1 | CDP Core chạy riêng, multi-tenant; Odoo chỉ cài add-on kết nối + giao diện | 13/10/2026 |
+| D2 | Không có engine tính toán trong Odoo; các gói Lite/Pro/AI là cờ tính năng trên Core | 13/10/2026 |
+| D3 | **DMAG sở hữu toàn bộ sản phẩm/dịch vụ**: Dental ERP, Marketing Automation, CDP Core, các module `cdp_*`, SDK và tài liệu | 13/10/2026 |
+| D4 | Marketing Automation do Bizapp tự viết lại, mô phỏng tính năng bản Enterprise, không dùng mã Enterprise. Ghi thành điều khoản hợp đồng | 13/10/2026 |
+| D5 | Dental ERP + CDP **mặc định SaaS do DMAG host**; có gói **Dedicated** (cài server riêng của khách) với giá riêng, cao hơn | 13/10/2026 |
+| D6 | Website bán khóa học của DMAG là eLearning trên Odoo; tracking SDK gửi thẳng tới Core | 13/10/2026 |
+| D7 | Đồng bộ Odoo → Core bằng outbox (không dùng CDC làm cơ chế chính); dữ liệu CDP trong Odoo lưu ở model `cdp.profile` riêng | 13/10/2026 |
 
 ## 1. Quyết định kiến trúc (đã chốt)
 
@@ -176,6 +192,26 @@ MA do Bizapp tự viết mô phỏng bản Enterprise. Bản Enterprise chọn �
 
 ---
 
+### 3.8. Mô hình triển khai: SaaS và Dedicated
+
+|  | **SaaS (mặc định)** | **Dedicated (theo yêu cầu, giá cao)** |
+|--|--------------------|---------------------------------------|
+| Odoo / Dental ERP | DMAG host, mỗi khách một database | Cài trên server của khách hoặc server riêng do DMAG quản lý |
+| CDP Core | Dùng chung cụm multi-tenant của DMAG | **Tùy chọn A**: vẫn kết nối Core SaaS (rẻ hơn, đủ tính năng). **Tùy chọn B**: cài Core single-tenant cạnh Odoo của khách |
+| Cập nhật | DMAG deploy liên tục | Theo bản phát hành có version; cập nhật theo lịch hợp đồng hoặc qua kênh cập nhật từ xa |
+| Dữ liệu | Tại hạ tầng DMAG (trong nước) | Nằm hoàn toàn tại khách (tùy chọn B). Đây là điểm bán hàng với chuỗi lớn khó tính về dữ liệu bệnh nhân |
+| AI dùng chung | Có (dữ liệu ẩn danh, theo hợp đồng) | Chỉ mô hình đóng gói sẵn, không đóng góp dữ liệu |
+| Tích hợp Zalo/Facebook/TikTok | Có | Server phải ra được internet tới các API này |
+
+Yêu cầu thiết kế để gói Dedicated không tốn thêm công phát triển:
+- **Một codebase, hai cấu hình.** Core chạy được ở chế độ single-tenant chỉ bằng cấu hình. Đóng gói bằng Docker Compose (khách nhỏ) và Helm chart (khách lớn).
+- **Chỉ dùng thành phần mã nguồn mở tự host được** (PostgreSQL, ClickHouse, Redpanda, MinIO). Không phụ thuộc dịch vụ managed của một nhà cung cấp cloud cụ thể.
+- **License key / kích hoạt** cho bản Dedicated: kiểm soát số chi nhánh, gói tính năng, hạn hỗ trợ.
+- **Bảo vệ sở hữu trí tuệ** khi mã nằm trên server khách:
+  - Mã Python của module Odoo không che giấu được thực sự, nên dựa vào **hợp đồng license (EULA)**: cấm sao chép, cấm bán lại, cấm reverse-engineer.
+  - Core có thể giao dưới dạng container image thay vì mã nguồn.
+- **Nghĩa vụ giấy phép mã nguồn mở** chỉ thực sự phát sinh khi giao phần mềm cho khách: LGPL (lõi Odoo đã sửa), AGPL (nếu dùng module OCA giấy phép AGPL). Cần danh mục giấy phép (mục 6).
+
 ## 4. Tenant DMAG: use-case ưu tiên
 
 | # | Use-case | Kích hoạt | KPI |
@@ -208,15 +244,15 @@ MVP: use-case 1–3.
 
 ## 6. Pháp lý, bản quyền & sở hữu
 
-- **Code thuộc DMAG**: ghi rõ trong hợp đồng với Bizapp. Áp dụng cho CDP Core, các module `cdp_*`, và (nên) cả Dental ERP lẫn Marketing Automation, vì đây là sản phẩm DMAG sẽ bán. Gồm điều khoản chuyển giao mã nguồn, tài liệu và quyền sửa đổi/phân phối.
-- **Marketing Automation "mô phỏng bản Enterprise"**:
-  - Viết lại tính năng tương tự là được. Ý tưởng và tính năng không được bảo hộ bản quyền, chính Odoo Community có nhiều module OCA tương tự Enterprise.
-  - Điều **không được** là sao chép hoặc chỉnh sửa từ mã nguồn, giao diện hay tài nguyên của Odoo Enterprise (giấy phép OEEL).
-  - Đề nghị: đưa vào hợp đồng **cam kết bằng văn bản của Bizapp** rằng module tự viết, không chứa mã Enterprise, kèm điều khoản bồi thường nếu vi phạm.
-- **LGPLv3 của Odoo Community**:
-  - Module riêng của DMAG được phép dùng giấy phép độc quyền.
-  - Nếu Bizapp **sửa trực tiếp mã nguồn lõi Odoo** (không qua module) mà DMAG phân phối cho phòng khám cài on-premise, phải công bố mã của phần sửa đổi đó.
-  - Chạy dạng SaaS thì nghĩa vụ này không phát sinh theo cùng cách. Nên kiểm tra có sửa lõi hay không.
+- **DMAG sở hữu toàn bộ sản phẩm** (D3): Dental ERP, Marketing Automation, CDP Core, các module `cdp_*`, SDK, tài liệu. Các điều khoản cần có trong hợp đồng với Bizapp được liệt kê tại [`dieu-khoan-hop-dong-bizapp.md`](dieu-khoan-hop-dong-bizapp.md).
+- **Marketing Automation "mô phỏng bản Enterprise"** (D4):
+  - Viết lại tính năng tương tự là hợp lệ. Tính năng và ý tưởng không được bảo hộ bản quyền.
+  - **Không được** sao chép hay chỉnh sửa mã nguồn, giao diện, tài nguyên của Odoo Enterprise (giấy phép OEEL).
+  - Ghi thành cam kết + bồi thường trong hợp đồng.
+- **Giấy phép mã nguồn mở**:
+  - Odoo Community dùng **LGPLv3**: module riêng của DMAG được dùng giấy phép độc quyền.
+  - Nếu **sửa trực tiếp lõi Odoo** và giao phần mềm cho khách (gói Dedicated), phải công bố mã của phần sửa đó.
+  - **Module OCA dùng AGPLv3** (nhiều module OCA dùng giấy phép này): AGPL áp dụng cả khi chỉ cung cấp qua mạng (SaaS). Module của DMAG phụ thuộc trực tiếp vào chúng có thể bị yêu cầu công bố mã. Do đó Bizapp phải cung cấp **danh mục mọi module bên thứ ba kèm giấy phép**, và tránh hoặc cách ly module AGPL khỏi các module thương mại.
 - **Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15** (hiệu lực 01/01/2026):
   - Consent theo mục đích; quyền truy cập/xóa/rút đồng ý; lưu trữ trong nước; hồ sơ đánh giá tác động.
   - Với phòng khám: dữ liệu sức khỏe là **dữ liệu nhạy cảm**. Phòng khám là bên kiểm soát, DMAG là bên xử lý, cần **DPA** với từng phòng khám.
@@ -257,22 +293,24 @@ MVP: use-case 1–3.
 | Dữ liệu sức khỏe & quảng cáo | Tối thiểu hóa dữ liệu, DPA, mặc định không target theo điều trị |
 | Gửi tin chồng chéo MA ↔ Core | Một orchestrator mỗi kênh, giới hạn tần suất chung |
 | Ước tính tải sai | Đo số liệu thật ở giai đoạn 0; Core scale ngang được |
+| Module AGPL lẫn vào sản phẩm thương mại | Danh mục giấy phép do Bizapp cung cấp; kiểm tra tự động trường `license` trong manifest ở CI |
+| Bản Dedicated bị sao chép / phân mảnh phiên bản | EULA + license key; một codebase, phát hành có version, giới hạn số phiên bản được hỗ trợ đồng thời |
 
 ---
 
 ## 9. Câu hỏi còn mở
 
-1. Dental ERP sẽ chạy **SaaS do DMAG/Bizapp host** hay **on-premise tại phòng khám**? Tài liệu đang giả định SaaS.
-2. Bizapp có dùng `queue_job` (OCA) không? Có sửa trực tiếp mã lõi Odoo không?
-3. MA của Bizapp: chọn đối tượng bằng domain filter? Hỗ trợ kênh nào (email/SMS/ZNS)? Có cơ chế trigger theo sự kiện không?
-4. Video trên eLearning host ở đâu (YouTube, Vimeo, Google Drive, server riêng)? Điều này ảnh hưởng cách theo dõi tiến độ xem.
-5. Cổng thanh toán đang dùng (VNPay, MoMo, chuyển khoản…)?
-6. Số liệu thật: traffic/tháng, số đơn/tháng, số học viên đang học.
+Câu hỏi kỹ thuật cho Bizapp (trả lời trong workshop):
+1. Có dùng `queue_job` (OCA) không? Có sửa trực tiếp mã lõi Odoo không? Danh sách module bên thứ ba kèm giấy phép.
+2. MA của Bizapp: chọn đối tượng bằng domain filter? Hỗ trợ kênh nào (email/SMS/ZNS)? Có cơ chế trigger theo sự kiện không?
+3. Video trên eLearning host ở đâu (YouTube, Vimeo, Google Drive, server riêng)? Điều này ảnh hưởng cách theo dõi tiến độ xem.
+4. Cổng thanh toán đang dùng (VNPay, MoMo, chuyển khoản…)?
+5. Số liệu thật: traffic/tháng, số đơn/tháng, số học viên đang học.
 
 ## 10. Bước tiếp theo
 
 1. Gửi tài liệu này + [`data-contract-v1.md`](data-contract-v1.md) cho Bizapp, workshop 1 buổi để xác nhận model thực tế.
-2. Bizapp trả lời các câu hỏi mục 9; chốt hợp đồng IP.
+2. **Đưa checklist [`dieu-khoan-hop-dong-bizapp.md`](dieu-khoan-hop-dong-bizapp.md) cho luật sư** để soạn/bổ sung hợp đồng với Bizapp, trước khi Bizapp bắt đầu viết module mới.
 3. Dựng khung repo:
    - `core/`;
    - `odoo_addons/cdp_base`, `cdp_education`, `cdp_marketing_bridge`;
