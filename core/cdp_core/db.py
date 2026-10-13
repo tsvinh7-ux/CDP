@@ -47,7 +47,7 @@ def engine():
 
 
 def init_db():
-    from . import models  # noqa: F401  (register tables)
+    from . import analytics, models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(engine())
 

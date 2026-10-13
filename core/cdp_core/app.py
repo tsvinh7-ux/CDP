@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 
-from . import consent, destinations, jobs, pipeline, privacy, secrets, security
+from . import analytics, consent, destinations, jobs, pipeline, privacy, queue, secrets, security
 from .config import settings
 from .db import init_db, session_scope
 from .destinations.zalo import verify_webhook
@@ -75,6 +75,20 @@ async def odoo_batch(request: Request,
             raise HTTPException(400, "messages must be a list")
         if len(messages) > settings.max_batch_messages:
             raise HTTPException(413, "batch too large")
+        if settings.ingest_mode == "queue":
+            # Acknowledge once durably queued; duplicates are dropped by the consumer.
+            result = {"accepted": [], "duplicates": [], "rejected": []}
+            valid = []
+            for m in messages:
+                error = pipeline._validate_odoo(m) if isinstance(m, dict) else "not an object"
+                if error:
+                    result["rejected"].append({"event_id": (m or {}).get("event_id"), "error": error})
+                else:
+                    valid.append(m)
+                    result["accepted"].append(m["event_id"])
+            if valid:
+                queue.enqueue(session, tenant.id, "odoo", valid)
+            return result
         return pipeline.ingest_odoo_batch(session, tenant, messages)
 
 
@@ -92,6 +106,9 @@ async def collect(request: Request):
         tenant = session.scalar(select(Tenant).where(Tenant.write_key == data.get("writeKey")))
         if tenant is None:
             raise HTTPException(401, "unknown writeKey")
+        if settings.ingest_mode == "queue":
+            queue.enqueue(session, tenant.id, "web", batch)
+            return {"queued": len(batch)}
         return pipeline.ingest_web_batch(session, tenant, batch)
 
 
@@ -374,3 +391,9 @@ def privacy_requests(tenant: str):
         return [{"id": r.id, "kind": r.kind, "partner_id": r.partner_id, "source": r.source,
                  "requested_at": iso(r.requested_at), "completed_at": iso(r.completed_at),
                  "details": r.details} for r in rows]
+
+
+@app.get("/v1/admin/reports/attribution", dependencies=[Depends(admin)])
+def report_attribution(tenant: str):
+    with session_scope() as s:
+        return analytics.attribution(s, tenant)

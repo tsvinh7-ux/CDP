@@ -15,7 +15,7 @@ def session(tmp_path):
     url = os.environ.get("CDP_TEST_DATABASE_URL") or f"sqlite:///{tmp_path / 'cdp.db'}"
     db.configure(url)
     from cdp_core.db import Base
-    from cdp_core import models  # noqa: F401
+    from cdp_core import analytics, models  # noqa: F401
 
     Base.metadata.drop_all(db.engine())
     Base.metadata.create_all(db.engine())
