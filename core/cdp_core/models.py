@@ -266,3 +266,16 @@ class IngestQueue(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class MLModel(Base):
+    """Trained per-tenant prediction model (payload) and its evaluation (metrics)."""
+
+    __tablename__ = "ml_models"
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), primary_key=True)  # next_touchpoint | product_propensity
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    trained_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    payload: Mapped[dict] = mapped_column(JsonType, default=dict)
+    metrics: Mapped[dict] = mapped_column(JsonType, default=dict)

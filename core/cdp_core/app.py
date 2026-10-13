@@ -7,14 +7,16 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 
-from . import analytics, consent, destinations, jobs, pipeline, privacy, queue, secrets, security
+from . import analytics, consent, dashboard, destinations, jobs, pipeline, predict, privacy, queue, secrets, security
+from . import touchpoints as tp
 from .config import settings
 from .db import init_db, session_scope
 from .destinations.zalo import verify_webhook
-from .models import Delivery, Destination, Event, MergeSuggestion, PrivacyRequest, Profile, Segment, Tenant
+from .models import Delivery, Destination, Event, MergeSuggestion, PrivacyRequest, Profile, Segment, Tenant, utcnow
 from .traits import iso
 
 _logger = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="DMAG CDP Core", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 # --------------------------------------------------------------------------- public
@@ -436,3 +439,149 @@ def preview_segment(tenant: str, body: PreviewIn):
 @app.post("/v1/admin/reconcile", dependencies=[Depends(admin)])
 def reconcile(tenant: str):
     return jobs.reconcile(tenant)
+
+
+# --------------------------------------------------------------------------- journey, dashboard, models
+
+def journey_doc(session, tenant: Tenant, profile: Profile) -> dict:
+    t = profile.traits or {}
+    points = tp.for_profile(session, tenant.id, profile.id)
+    stage_idx = max((tp.STAGE_INDEX[x.stage] for x in points if x.direction == "in"), default=-1)
+    return {
+        "profile": {"id": profile.id, "partner_id": profile.partner_id, "name": t.get("name") or "Khách ẩn danh",
+                    "job_role": t.get("job_role"), "clinic": (t.get("clinic") or {}).get("name"),
+                    "segments": profile.segment_keys or [], "lead_score": t.get("lead_score"),
+                    "rfm_segment": t.get("rfm_segment"), "total_spent": t.get("total_spent"),
+                    "first_touch": t.get("first_touch")},
+        "now": iso(utcnow()),
+        "stage_reached": tp.STAGES[stage_idx][0] if stage_idx >= 0 else None,
+        "touchpoints": [x.as_dict() for x in points],
+        "predictions": {"next_touchpoints": t.get("next_touchpoints") or [],
+                        "products": t.get("predicted_products") or [],
+                        "purchase_probability_30d": t.get("purchase_probability_30d")},
+        "meta": tp.meta(),
+    }
+
+
+@app.get("/v1/admin/profiles/{profile_id}/journey", dependencies=[Depends(admin)])
+def profile_journey(profile_id: str):
+    with session_scope() as s:
+        p = s.get(Profile, profile_id)
+        if p is None:
+            raise HTTPException(404)
+        return journey_doc(s, s.get(Tenant, p.tenant_id), p)
+
+
+@app.get("/v1/admin/dashboard", dependencies=[Depends(admin)])
+def get_dashboard(tenant: str, days: int = 30):
+    with session_scope() as s:
+        t = s.get(Tenant, tenant)
+        if t is None:
+            raise HTTPException(404)
+        return dashboard.build(s, t, max(1, min(days, 365)))
+
+
+@app.post("/v1/admin/models/train", dependencies=[Depends(admin)])
+def train_models(tenant: str):
+    with session_scope() as s:
+        t = s.get(Tenant, tenant)
+        if t is None:
+            raise HTTPException(404)
+        result = predict.train(s, t)
+        jobs.refresh_tenant(s, t)
+        return result
+
+
+def _embed_profile(s, tenant: str, partner_id: int, exp: int, sig: str) -> tuple[Tenant, Profile]:
+    import hashlib
+    import hmac
+    import time
+
+    t = s.get(Tenant, tenant)
+    if t is None or exp < time.time():
+        raise HTTPException(401, "expired")
+    expected = hmac.new(t.secret.encode(), f"{tenant}.{partner_id}.{exp}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig or ""):
+        raise HTTPException(401, "invalid signature")
+    from .identity import find_by_partner
+    p = find_by_partner(s, tenant, partner_id)
+    if p is None:
+        raise HTTPException(404, "no CDP profile")
+    return t, p
+
+
+@app.get("/embed/journey")
+def embed_journey_page():
+    """Journey view embedded in Odoo (signed link, see cdp_base: CDP 360 tab)."""
+    return FileResponse(STATIC / "journey.html", media_type="text/html")
+
+
+@app.get("/embed/journey/data")
+def embed_journey_data(tenant: str, partner_id: int, exp: int, sig: str):
+    with session_scope() as s:
+        t, p = _embed_profile(s, tenant, partner_id, exp, sig)
+        return journey_doc(s, t, p)
+
+
+# --------------------------------------------------------------------------- Facebook Lead Ads webhook
+
+def http_client():
+    """Outbound HTTP client for webhook handlers (replaced in tests)."""
+    import httpx
+    return httpx.Client(timeout=30)
+
+
+def _lead_destination(s, tenant_id: str) -> Destination:
+    dest = s.scalar(select(Destination).where(Destination.tenant_id == tenant_id, Destination.type == "facebook_leads",
+                                              Destination.enabled.is_(True)))
+    if dest is None:
+        raise HTTPException(404, "no facebook_leads destination")
+    return dest
+
+
+@app.get("/v1/webhooks/facebook/{tenant_id}")
+def facebook_verify(tenant_id: str, request: Request):
+    """Meta webhook subscription handshake (hub.challenge)."""
+    q = request.query_params
+    with session_scope() as s:
+        dest = _lead_destination(s, tenant_id)
+        if q.get("hub.mode") == "subscribe" and q.get("hub.verify_token") == (dest.config or {}).get("verify_token"):
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse(q.get("hub.challenge", ""))
+    raise HTTPException(403, "verification failed")
+
+
+@app.post("/v1/webhooks/facebook/{tenant_id}")
+async def facebook_leads(tenant_id: str, request: Request, x_hub_signature_256: str = Header(None)):
+    import hashlib
+    import hmac
+
+    import httpx
+
+    from .destinations.facebook import GraphError, LeadAds
+
+    raw = await request.body()
+    with session_scope() as s:
+        tenant = s.get(Tenant, tenant_id)
+        dest = _lead_destination(s, tenant_id)
+        app_secret = secrets.decrypt(((dest.config or {}).get("secrets") or {}).get("app_secret")) or ""
+        expected = "sha256=" + hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
+        if not app_secret or not hmac.compare_digest(expected, x_hub_signature_256 or ""):
+            raise HTTPException(401, "invalid signature")
+        body = json.loads(raw or b"{}")
+        results = []
+        with http_client() as client:
+            handler = LeadAds(s, tenant, dest, client)
+            for entry in body.get("entry") or []:
+                for change in entry.get("changes") or []:
+                    value = change.get("value") or {}
+                    if change.get("field") != "leadgen" or not value.get("leadgen_id"):
+                        continue
+                    try:
+                        lead = handler.fetch_lead(value["leadgen_id"])
+                    except (GraphError, httpx.HTTPError) as exc:
+                        dest.last_error = str(exc)
+                        results.append({"leadgen_id": value["leadgen_id"], "error": str(exc)})
+                        continue
+                    results.append(pipeline.ingest_facebook_lead(s, tenant, lead, value))
+        return {"results": results}

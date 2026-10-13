@@ -44,6 +44,27 @@ def _money(amount) -> str:
         return "?"
 
 
+# Touchpoints without a bespoke label above (CRM, email, events, Zalo receipts).
+EXTRA_LABELS = {
+    "facebook.lead_submitted": "Điền form quảng cáo Facebook",
+    "marketing.email_sent": "Nhận email {campaign}",
+    "marketing.email_opened": "Mở email {campaign}",
+    "marketing.email_clicked": "Click email {campaign}",
+    "marketing.email_replied": "Trả lời email",
+    "marketing.email_bounced": "Email không tới được",
+    "marketing.unsubscribed": "Hủy nhận email",
+    "lead.stage_changed": "Cơ hội chuyển sang \"{stage}\"",
+    "lead.won": "Chốt cơ hội bán hàng",
+    "lead.lost": "Mất cơ hội bán hàng",
+    "sales.activity_done": "Sales: {activity_type} – {summary}",
+    "event.registered": "Đăng ký {event_name}",
+    "event.attended": "Tham dự {event_name}",
+    "event.cancelled": "Hủy đăng ký {event_name}",
+    "zalo.user_received_message": "Nhận tin ZNS",
+    "zalo.user_seen_message": "Đã xem tin ZNS",
+}
+
+
 def _label(event) -> str:
     p = event.payload.get("properties") or {}
     t = event.event_type
@@ -90,7 +111,12 @@ def _label(event) -> str:
         "zalo.user_submit_info": "Chia sẻ thông tin qua Zalo OA",
         "consent.updated": "{} đồng ý: {}".format("Cấp" if p.get("granted") else "Rút", p.get("purpose")),
     }
-    return labels.get(t, t)
+    if t in labels:
+        return labels[t]
+    if t in EXTRA_LABELS:
+        return EXTRA_LABELS[t].format(**{k: p.get(k) or "" for k in
+                                         ("campaign", "stage", "activity_type", "summary", "event_name")}).strip(" –")
+    return t
 
 
 def compute_person(partner_fields: dict | None, events: list, now: datetime, cfg: dict) -> dict:
@@ -128,6 +154,11 @@ def compute_person(partner_fields: dict | None, events: list, now: datetime, cfg
         at = aware(ev.occurred_at)
         p = ev.payload.get("properties") or {}
         last_seen = max(last_seen, at) if last_seen else at
+        if ev.event_type == "facebook.lead_submitted" and p.get("full_name") and not t.get("name"):
+            t["name"] = p["full_name"]
+        if ev.event_type == "facebook.lead_submitted" and p.get("utm_source"):
+            first_touch = first_touch or {"source": "facebook", "medium": "lead_ads",
+                                          "campaign": p.get("campaign"), "at": iso(at)}
         fb_ids.update((ev.payload.get("context") or {}).get("fb") or {})
         et = ev.event_type
 

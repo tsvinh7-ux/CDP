@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hành trình khách hàng</title>
+<link rel="stylesheet" href="/static/cdp-viz.css">
+<style>
+  html, body { margin: 0; }
+  body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .viz-root { background: var(--plane); color: var(--text-primary); min-height: 100vh; padding: 12px; box-sizing: border-box; }
+  .who { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; margin: 0 0 12px; }
+  .who h2 { margin: 0; font-size: 16px; }
+  .who span { color: var(--text-secondary); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 12px; align-items: start; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .err { color: var(--critical); }
+</style>
+</head>
+<body>
+<div class="viz-root" id="root">
+  <div class="who" id="who"><span>Đang tải…</span></div>
+  <div class="grid">
+    <div id="journey"></div>
+    <div id="pred"></div>
+  </div>
+</div>
+<script src="/static/cdp-viz.js"></script>
+<script>
+(function () {
+  "use strict";
+  const q = new URLSearchParams(location.search);
+  if (q.get("theme")) document.documentElement.setAttribute("data-theme", q.get("theme"));
+  const who = document.getElementById("who");
+  const params = new URLSearchParams();
+  for (const k of ["tenant", "partner_id", "exp", "sig"]) params.set(k, q.get(k) || "");
+  fetch("/embed/journey/data?" + params.toString())
+    .then((r) => { if (!r.ok) throw new Error(r.status === 403 ? "Liên kết đã hết hạn hoặc không hợp lệ." : "Không tải được dữ liệu (" + r.status + ")."); return r.json(); })
+    .then((data) => {
+      const p = data.profile;
+      who.innerHTML = "";
+      const h = document.createElement("h2"); h.textContent = p.name; who.appendChild(h);
+      const bits = [p.job_role, p.clinic, p.lead_score != null ? "Lead score " + p.lead_score : null,
+        p.total_spent ? "Đã chi " + CDPViz.money(p.total_spent) : null, (p.segments || []).length ? (p.segments || []).length + " phân khúc" : null];
+      for (const b of bits.filter(Boolean)) { const s = document.createElement("span"); s.textContent = b; who.appendChild(s); }
+      CDPViz.journey(document.getElementById("journey"), data);
+      CDPViz.predictions(document.getElementById("pred"), data);
+    })
+    .catch((e) => { who.innerHTML = ""; const s = document.createElement("span"); s.className = "err"; s.textContent = e.message; who.appendChild(s); });
+})();
+</script>
+</body>
+</html>

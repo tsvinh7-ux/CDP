@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import consent, identity, privacy, security, segments as seg
+from . import consent, identity, predict, privacy, security, segments as seg
 from .models import Activation, Entity, Event, Profile, Segment, SegmentMember, Tenant, utcnow
 from .normalize import normalize_email, normalize_phone
 from .traits import clinic_summary, compute_account, compute_person, parse_dt, recommend
@@ -107,6 +107,7 @@ def refresh_profile(session: Session, tenant: Tenant, profile: Profile, now: dat
     catalog = _catalog(session, tenant.id)
     if catalog:
         traits.update(recommend(traits, catalog, cfg))
+    traits.update(predict.predictions_for(session, tenant, traits, events, now))
     _set_traits(profile, traits, now)
     evaluate_segments(session, tenant, profile, now)
 
@@ -339,6 +340,8 @@ def ingest_web_batch(session: Session, tenant: Tenant, batch: list[dict]) -> dic
 def ingest_zalo(session: Session, tenant: Tenant, oa_id: str, body: dict) -> dict:
     """One Zalo OA webhook event (follow, unfollow, user message, user_submit_info...)."""
     name = body.get("event_name") or "unknown"
+    if name in ("user_received_message", "user_seen_message"):
+        return _zalo_receipt(session, tenant, name, body)
     uid = ((body.get("follower") or {}).get("id") or (body.get("sender") or {}).get("id")
            or body.get("user_id_by_app"))
     if not uid:
@@ -365,5 +368,63 @@ def ingest_zalo(session: Session, tenant: Tenant, oa_id: str, body: dict) -> dic
         session.delete(ev)
         return {"ignored": "erased"}
     ev.profile_id = profile.id
+    refresh_profile(session, tenant, identity.canonical(session, profile.id))
+    return {"accepted": True, "profile_id": profile.id}
+
+
+def _zalo_receipt(session: Session, tenant: Tenant, name: str, body: dict) -> dict:
+    """ZNS delivery/seen receipts: matched to the CDP delivery through tracking_id "cdp-<id>"."""
+    from .models import Delivery
+
+    message = body.get("message") or {}
+    tracking = str(message.get("tracking_id") or body.get("tracking_id") or "")
+    if not tracking.startswith("cdp-") or not tracking[4:].isdigit():
+        return {"ignored": "not a CDP message"}
+    delivery = session.get(Delivery, int(tracking[4:]))
+    if delivery is None or delivery.tenant_id != tenant.id or not delivery.profile_id:
+        return {"ignored": "unknown delivery"}
+    try:
+        occurred = datetime.fromtimestamp(int(body.get("timestamp")) / 1000, tz=utcnow().tzinfo)
+    except (TypeError, ValueError):
+        occurred = utcnow()
+    delivery.payload = {**(delivery.payload or {}), name.replace("user_", "").replace("_message", "") + "_at": occurred.isoformat()}
+    payload = {"properties": {"tracking_id": tracking, "msg_id": message.get("msg_id"),
+                              "segment_key": (delivery.payload or {}).get("segment_key")}, "context": {}}
+    ev = _store_event(session, tenant, f"zalo:{name}:{tracking}", "zalo", "track", f"zalo.{name}", occurred, payload)
+    if ev is None:
+        return {"duplicate": True}
+    profile = identity.canonical(session, delivery.profile_id)
+    ev.profile_id = profile.id
+    refresh_profile(session, tenant, profile)
+    return {"accepted": True, "profile_id": profile.id}
+
+
+# --------------------------------------------------------------------------- Facebook Lead Ads
+
+def ingest_facebook_lead(session: Session, tenant: Tenant, lead: dict, change: dict) -> dict:
+    """A lead form submitted in a Facebook/Instagram ad (fields fetched from the Graph API)."""
+    fields = {f.get("name"): (f.get("values") or [None])[0] for f in lead.get("field_data") or []}
+    email = normalize_email(fields.get("email"))
+    phone = normalize_phone(fields.get("phone_number") or fields.get("phone"))
+    ids = [(k, v) for k, v in (("email", email), ("phone", phone), ("fb_lead", lead.get("id"))) if v]
+    if not ids:
+        return {"ignored": "no identifier"}
+    occurred = parse_dt(lead.get("created_time")) or utcnow()
+    props = {"form_id": change.get("form_id") or lead.get("form_id"), "ad_id": change.get("ad_id") or lead.get("ad_id"),
+             "campaign": lead.get("campaign_name"), "ad_name": lead.get("ad_name"),
+             "full_name": fields.get("full_name"), "utm_source": "facebook", "utm_medium": "lead_ads",
+             "utm_campaign": lead.get("campaign_name")}
+    ev = _store_event(session, tenant, f"fb_lead:{lead.get('id')}", "facebook", "track", "facebook.lead_submitted",
+                      occurred, {"properties": {k: v for k, v in props.items() if v}, "context": {}})
+    if ev is None:
+        return {"duplicate": True}
+    profile = identity.resolve(session, tenant.id, ids)
+    if privacy.is_erased(profile):
+        session.delete(ev)
+        return {"ignored": "erased"}
+    ev.profile_id = profile.id
+    traits = profile.traits or {}
+    if fields.get("full_name") and not traits.get("name"):
+        profile.traits = {**traits, "name": fields["full_name"]}
     refresh_profile(session, tenant, identity.canonical(session, profile.id))
     return {"accepted": True, "profile_id": profile.id}

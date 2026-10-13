@@ -203,3 +203,24 @@ class CustomAudiences(_Graph):
         for i in range(0, len(rows), 10000):
             payload = {"schema": ["EMAIL", "PHONE"], "data": rows[i:i + 10000]}  # values are SHA-256 hashes
             self.call(method, f"{audience_id}/users", payload=json.dumps(payload))
+
+
+@register
+class LeadAds(_Graph):
+    """Facebook Lead Ads: webhook receiver + lead lookup (no outbound deliveries).
+
+    config:  {"app_id": ..., "verify_token": "<chosen string>", "graph_url"?: ...}
+    secrets: {"app_secret": "...", "page_access_token": "..."}
+    """
+
+    type = "facebook_leads"
+
+    def fetch_lead(self, leadgen_id: str) -> dict:
+        url = self.url(str(leadgen_id))
+        resp = self.client.get(url, params={"access_token": self.secret("page_access_token"),
+                                            "fields": "id,created_time,field_data,ad_id,ad_name,form_id,campaign_name"},
+                               timeout=30)
+        body = resp.json() if resp.content else {}
+        if resp.status_code >= 400 or "error" in body:
+            raise GraphError((body.get("error") or {}).get("message") or f"HTTP {resp.status_code}")
+        return body

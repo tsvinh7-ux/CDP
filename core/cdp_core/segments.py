@@ -125,6 +125,10 @@ TRAIT_CATALOG = [
     ("clinic.staff_course_tags", "Thẻ khóa nhân sự đã học", "list"),
     ("next_best_course.name", "Khóa gợi ý tiếp theo", "text"),
     ("clinic_next_course.name", "Khóa gợi ý cho phòng khám", "text"),
+    ("purchase_probability_30d", "Xác suất mua trong 30 ngày (0–1)", "number"),
+    ("predicted_products.0.item", "Sản phẩm/dịch vụ dự đoán sẽ mua", "text"),
+    ("predicted_products.0.probability", "Xác suất mua sản phẩm dự đoán #1", "number"),
+    ("next_touchpoints.0.key", "Điểm chạm dự đoán tiếp theo", "text"),
     ("next_appointment_at", "Lịch hẹn sắp tới (nha khoa)", "date"),
     ("last_visit_at", "Lần khám gần nhất (nha khoa)", "date"),
     ("no_show_rate", "Tỷ lệ không đến (nha khoa)", "number"),
@@ -133,6 +137,14 @@ TRAIT_CATALOG = [
     ("installments_overdue", "Trả góp quá hạn", "list"),
     ("treatment_value", "Giá trị điều trị (đ)", "number"),
 ]
+
+
+LIKELY_BUYERS = {
+    "key": "likely_buyers_30d",
+    "name": "Dự đoán mua trong 30 ngày (≥ 50%)",
+    "description": "Mô hình dự đoán: xác suất mua ít nhất một sản phẩm/dịch vụ trong 30 ngày tới ≥ 50%.",
+    "rule": {"trait": "purchase_probability_30d", "op": "gte", "value": 0.5},
+}
 
 
 def dental_segments() -> list[dict]:
@@ -155,6 +167,7 @@ def dental_segments() -> list[dict]:
          "rule": {"trait": "last_visit_at", "op": "older_than_minutes", "value": 525600}},
         {"key": "high_value_patients", "name": "Bệnh nhân giá trị cao (≥ 50 triệu)",
          "rule": {"trait": "treatment_value", "op": "gte", "value": 50_000_000}},
+        LIKELY_BUYERS,
     ]
 
 
@@ -217,6 +230,7 @@ def default_segments(abandon_minutes: int = 60, transfer_minutes: int = 30, vert
             "name": "Chi tiêu ≥ 10 triệu",
             "rule": {"trait": "total_spent", "op": "gte", "value": 10_000_000},
         },
+        LIKELY_BUYERS,
         {
             "key": "high_lead_score",
             "name": "Điểm lead ≥ 60",

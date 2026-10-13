@@ -4,9 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CDP Console</title>
+<link rel="stylesheet" href="/static/cdp-viz.css">
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2433; --muted:#667085; --line:#e4e7ec; --accent:#2f6fed; --accent-soft:#eef2ff;
-          --ok:#12805c; --warn:#b54708; --bad:#b42318; }
+          --ok:#12805c; --warn:#b54708; --bad:#b42318; --tag-ink:#3538cd; --hover:#f0f4ff;
+          --soft-ok:#ecfdf3; --soft-bad:#fef3f2; --soft-warn:#fff4ed; --input:#fff; color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#0d0d0d; --card:#1a1a19; --ink:#f0efec; --muted:#a3a29b; --line:#2c2c2a; --accent:#5b9bf0;
+      --accent-soft:#1d2a40; --ok:#3ccb8f; --warn:#f0a35e; --bad:#f1847c; --tag-ink:#b7c8ff; --hover:#22262e;
+      --soft-ok:#12271e; --soft-bad:#2e1716; --soft-warn:#2d2014; --input:#121212; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg:#0d0d0d; --card:#1a1a19; --ink:#f0efec; --muted:#a3a29b; --line:#2c2c2a; --accent:#5b9bf0;
+    --accent-soft:#1d2a40; --ok:#3ccb8f; --warn:#f0a35e; --bad:#f1847c; --tag-ink:#b7c8ff; --hover:#22262e;
+    --soft-ok:#12271e; --soft-bad:#2e1716; --soft-warn:#2d2014; --input:#121212; color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
   header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 24px; background:var(--card); border-bottom:1px solid var(--line); }
@@ -29,12 +39,12 @@
   th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   th { font-size:12px; color:var(--muted); font-weight:600; }
   td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; }
-  tr.click { cursor:pointer; } tr.click:hover { background:#f0f4ff; }
-  .tag { display:inline-block; padding:1px 7px; margin:1px 2px 1px 0; border-radius:10px; background:var(--accent-soft); color:#3538cd; font-size:12px; }
-  .tag.trigger { background:#fff4ed; color:var(--warn); }
-  .tag.ok { background:#ecfdf3; color:var(--ok); } .tag.bad { background:#fef3f2; color:var(--bad); }
-  .src { font-size:11px; padding:1px 6px; border-radius:4px; background:#ecfdf3; color:var(--ok); }
-  .src.web { background:#eff8ff; color:#175cd3; } .src.zalo { background:#f4f3ff; color:#5925dc; }
+  tr.click { cursor:pointer; } tr.click:hover { background:var(--hover); }
+  .tag { display:inline-block; padding:1px 7px; margin:1px 2px 1px 0; border-radius:10px; background:var(--accent-soft); color:var(--tag-ink); font-size:12px; }
+  .tag.trigger { background:var(--soft-warn); color:var(--warn); }
+  .tag.ok { background:var(--soft-ok); color:var(--ok); } .tag.bad { background:var(--soft-bad); color:var(--bad); }
+  .src { font-size:11px; padding:1px 6px; border-radius:4px; background:var(--soft-ok); color:var(--ok); }
+  .src.web, .src.zalo { background:var(--accent-soft); color:var(--tag-ink); }
   .muted { color:var(--muted); }
   pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow:auto; max-height:360px; font-size:12px; }
   .scroll { max-height:460px; overflow:auto; }
@@ -42,18 +52,37 @@
   .btn { border:1px solid var(--line); background:var(--card); padding:6px 12px; border-radius:6px; cursor:pointer; }
   .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
   .btn.danger { color:var(--bad); }
-  input, select, textarea { border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:#fff; color:var(--ink); }
+  input, select, textarea { border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:var(--input); color:var(--ink); }
   textarea { width:100%; min-height:110px; font-family: ui-monospace, monospace; font-size:12px; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
   .row > label { min-width:110px; color:var(--muted); }
   .cond { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1.2fr) minmax(0,1.2fr) auto; gap:6px; margin-bottom:6px; }
   .cond select, .cond input { width:100%; min-width:0; }
   .bar { height:8px; background:var(--accent); border-radius:4px; }
-  .notice { padding:8px 12px; border-radius:6px; background:#ecfdf3; color:var(--ok); margin-top:8px; display:none; }
+  .notice { padding:8px 12px; border-radius:6px; background:var(--soft-ok); color:var(--ok); margin-top:8px; display:none; }
+  .dash { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:16px; }
+  .dash > .full { grid-column: 1 / -1; }
+  .filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; grid-column: 1 / -1; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .seg button { border:0; background:var(--card); color:var(--muted); padding:6px 12px; cursor:pointer; font:inherit; }
+  .seg button.on { background:var(--accent-soft); color:var(--tag-ink); font-weight:600; }
+  .badge { padding:2px 8px; border-radius:10px; font-size:12px; background:var(--soft-warn); color:var(--warn); }
+  .mq { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:16px; }
+  .mq-row { display:grid; grid-template-columns: 90px minmax(0, 1fr) 54px; gap:8px; align-items:center; font-size:12px; margin:6px 0; color:var(--text-secondary); }
+  .mq-row b { color:var(--text-primary); text-align:right; font-variant-numeric: tabular-nums; }
+  .mq-track { height:8px; border-radius:4px; background:var(--grid); position:relative; }
+  .mq-track i { position:absolute; inset:0 auto 0 0; border-radius:4px; }
+  .jgrid { display:grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap:16px; margin:12px 0; align-items:start; }
+  .dash { align-items:start; }
+  #d-tiles.viz-tiles { grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr)); }
+  #d-tiles .viz-tile.hero { grid-column: auto; grid-row: span 2; display:flex; flex-direction:column; justify-content:center; }
+  @media (max-width: 1100px) { #d-tiles.viz-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } #d-tiles .viz-tile.hero { grid-column: span 3; grid-row: auto; } }
+  @media (max-width: 600px) { #d-tiles.viz-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } #d-tiles .viz-tile.hero { grid-column: span 2; } }
+  @media (max-width: 900px) { .dash, .mq, .jgrid { grid-template-columns: 1fr; } }
   @media (max-width: 900px) { .tab.active { grid-template-columns: 1fr; } main { padding:16px; } .cond { grid-template-columns: 1fr; } }
 </style>
 </head>
-<body>
+<body class="viz-root">
 <header>
   <h1>DMAG CDP Console</h1>
   <select id="tenant"></select>
@@ -63,7 +92,8 @@
   <span class="muted" id="updated"></span>
 </header>
 <nav id="tabs">
-  <button data-tab="overview" class="active">Tổng quan</button>
+  <button data-tab="dashboard" class="active">Dashboard</button>
+  <button data-tab="overview">Hoạt động</button>
   <button data-tab="segments">Phân khúc</button>
   <button data-tab="profiles">Hồ sơ</button>
   <button data-tab="destinations">Kênh kích hoạt</button>
@@ -71,7 +101,27 @@
   <button data-tab="privacy">Quyền riêng tư</button>
 </nav>
 <main>
-  <div class="tab active" id="tab-overview">
+  <div class="tab active" id="tab-dashboard">
+    <div class="filters">
+      <div class="seg" id="days" role="group" aria-label="Khoảng thời gian">
+        <button data-days="7">7 ngày</button><button data-days="30" class="on">30 ngày</button><button data-days="90">90 ngày</button></div>
+      <span class="badge" id="sim-badge" hidden>Dữ liệu mô phỏng – không phải số liệu thật</span>
+      <span class="spacer" style="flex:1"></span>
+      <span class="muted" id="dash-window"></span>
+      <button class="btn" id="train">Huấn luyện mô hình</button>
+    </div>
+    <div class="dash" style="grid-column:1/-1">
+      <div class="full" id="d-tiles"></div>
+      <div id="d-active"></div><div id="d-revenue"></div>
+      <div id="d-funnel"></div><div id="d-stage"></div>
+      <div class="full" id="d-channels"></div>
+      <div id="d-products"></div><div id="d-touch7"></div>
+      <div id="d-attr"></div><div id="d-segs"></div>
+      <div class="full viz-card" id="d-models"></div>
+    </div>
+  </div>
+
+  <div class="tab" id="tab-overview">
     <section class="wide"><h2>Tổng quan</h2><div class="kpis" id="kpis"></div></section>
     <section><h2>Phân khúc</h2><table id="seg-mini"></table></section>
     <section><h2>Sự kiện mới nhất</h2><div class="scroll"><table id="events"></table></div></section>
@@ -113,7 +163,8 @@
       <div class="row"><label>Loại</label><select id="d-type">
         <option value="facebook_capi">Facebook Conversions API</option>
         <option value="facebook_audience">Facebook Custom Audiences</option>
-        <option value="zalo_zns">Zalo ZNS + OA webhook</option></select></div>
+        <option value="zalo_zns">Zalo ZNS + OA webhook</option>
+        <option value="facebook_leads">Facebook Lead Ads (webhook)</option></select></div>
       <div class="row"><label>Tên</label><input id="d-name" style="flex:1"></div>
       <label class="muted">Cấu hình (JSON)</label><textarea id="d-config"></textarea>
       <label class="muted">Bí mật (JSON, được mã hóa khi lưu)</label><textarea id="d-secrets"></textarea>
@@ -132,8 +183,10 @@
     <section class="wide"><h2>Nhật ký yêu cầu quyền dữ liệu (Luật 91/2025/QH15)</h2><table id="privacy"></table></section>
   </div>
 </main>
+<script src="/static/cdp-viz.js"></script>
 <script>
 const qs = new URLSearchParams(location.search);
+if (qs.get('theme')) document.documentElement.setAttribute('data-theme', qs.get('theme'));
 const token = qs.get('token') || '';
 let tenant = qs.get('tenant');
 let segNames = {}, triggerKeys = new Set(), meta = {operators: {}, traits: []}, profilesCache = [];
@@ -159,10 +212,11 @@ async function init() {
   const ts = await api('/v1/admin/tenants');
   tenant = tenant || (ts[0] && ts[0].id);
   $('tenant').innerHTML = ts.map(t => `<option value="${esc(t.id)}" ${t.id === tenant ? 'selected' : ''}>${esc(t.name)} (${esc(t.id)})</option>`).join('');
-  $('tenant').onchange = e => { tenant = e.target.value; load(); };
+  $('tenant').onchange = e => { tenant = e.target.value; load(); loadDashboard(); };
   meta = await api('/v1/admin/meta');
   resetBuilder();
   load();
+  loadDashboard();
   setInterval(load, 10000);
 }
 
@@ -237,9 +291,14 @@ async function show(id) {
     <p>${(p.segments || []).map(k => `<span class="tag">${esc(segNames[k] || k)}</span>`).join(' ') || '<span class="muted">Chưa thuộc phân khúc nào</span>'}</p>
     <p>Điểm lead: <b>${t.lead_score ?? '–'}</b> <span class="muted">${esc((t.lead_score_reasons || []).join(' · '))}</span></p>${rec}${clinicRec}
     <div class="row">${Object.entries(purposes).map(([k, l]) => `<label><input type="checkbox" data-consent="${k}" ${consent[k] ? 'checked' : ''}> ${l}</label>`).join(' ')}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="jgrid"><div id="j-journey"></div><div id="j-pred"></div></div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px">
       <div>${tl ? `<table><tr><th>Thời điểm</th><th>Hoạt động</th></tr>${tl}</table>` : ''}</div>
       <div><pre>${esc(JSON.stringify(t, null, 2))}</pre></div></div>`;
+  if (p.kind === 'person') {
+    api(`/v1/admin/profiles/${id}/journey`).then(j => { CDPViz.journey($('j-journey'), j); CDPViz.predictions($('j-pred'), j); })
+      .catch(e => { $('j-journey').textContent = 'Không tải được hành trình: ' + e.message; });
+  } else { $('j-journey').closest('.jgrid').remove(); }
   document.querySelectorAll('[data-consent]').forEach(cb => cb.onchange = async () => {
     await api(`/v1/admin/profiles/${id}/consent`, {method: 'POST', body: JSON.stringify({purpose: cb.dataset.consent, granted: cb.checked, channel: 'admin', evidence: 'CDP console'})});
     show(id);
@@ -321,6 +380,7 @@ const templates = {
   facebook_audience: [{ad_account_id: 'act_', segments: ['high_value', 'clinic_owners']}, {access_token: ''}],
   zalo_zns: [{app_id: '', oa_id: '', mode: 'development', templates: {checkout_abandoned: {template_id: '', purpose: 'marketing',
     data: {customer_name: 'name', amount: 'open_cart.amount'}}}}, {secret_key: '', refresh_token: '', oa_secret_key: ''}],
+  facebook_leads: [{app_id: '', verify_token: ''}, {app_secret: '', page_access_token: ''}],
 };
 function fillTemplate() { const [c, s] = templates[$('d-type').value]; $('d-config').value = JSON.stringify(c, null, 2); $('d-secrets').value = JSON.stringify(s, null, 2); }
 $('d-type').onchange = fillTemplate; fillTemplate();
@@ -332,11 +392,116 @@ $('d-save').onclick = async () => {
   } catch (e) { flash('d-notice', 'Lỗi: ' + e.message, false); }
 };
 
-$('run').onclick = async () => { await api('/v1/admin/run-jobs?tenant=' + tenant, {method: 'POST'}); load(); };
+$('run').onclick = async () => { await api('/v1/admin/run-jobs?tenant=' + tenant, {method: 'POST'}); load(); loadDashboard(); };
 $('reconcile').onclick = async () => {
   try { const r = await api('/v1/admin/reconcile?tenant=' + tenant, {method: 'POST'}); alert('Đối soát: ' + JSON.stringify(r)); }
   catch (e) { alert('Lỗi đối soát: ' + e.message); }
 };
+// ---------------------------------------------------------------- dashboard
+let dashDays = 30;
+const V = window.CDPViz;
+const delta = (cur, prev) => (prev ? (cur - prev) / prev : null);
+const CHANNEL_LABEL = {};
+document.querySelectorAll('#days button').forEach(b => b.onclick = () => {
+  dashDays = Number(b.dataset.days);
+  document.querySelectorAll('#days button').forEach(x => x.classList.toggle('on', x === b));
+  loadDashboard();
+});
+document.querySelector('[data-tab=dashboard]').addEventListener('click', () => loadDashboard());
+$('train').onclick = async () => {
+  $('train').disabled = true; $('train').textContent = 'Đang huấn luyện…';
+  try { await api('/v1/admin/models/train?tenant=' + tenant, {method: 'POST'}); await loadDashboard(); }
+  catch (e) { alert('Lỗi huấn luyện: ' + e.message); }
+  finally { $('train').disabled = false; $('train').textContent = 'Huấn luyện mô hình'; }
+};
+
+async function loadDashboard() {
+  if (!tenant) return;
+  const d = await api(`/v1/admin/dashboard?tenant=${tenant}&days=${dashDays}`);
+  const k = d.kpis, pv = d.previous, period = `${dashDays} ngày trước`;
+  d.meta.channels.forEach(c => CHANNEL_LABEL[c.key] = c.label);
+  $('sim-badge').hidden = !d.tenant.simulated;
+  $('dash-window').textContent = `${V.day(d.window.start)} – ${V.day(d.window.end)}`;
+  V.tiles($('d-tiles'), [
+    {label: `Doanh thu ${dashDays} ngày`, value: V.money(k.revenue) + (k.revenue >= 1e3 ? ' đ' : ''), hero: true,
+     delta: delta(k.revenue, pv.revenue), period, spark: d.daily.map(x => x.revenue)},
+    {label: 'Khách hoạt động', value: V.compact(k.active), delta: delta(k.active, pv.active), period, spark: d.daily.map(x => x.active)},
+    {label: 'Hồ sơ mới', value: V.compact(k.new_profiles), delta: delta(k.new_profiles, pv.new_profiles), period,
+     note: 'lần đầu xuất hiện trong kỳ'},
+    {label: 'Hồ sơ đã định danh', value: V.compact(k.known), note: `trên ${V.compact(k.profiles)} hồ sơ (${V.pct(k.profiles ? k.known / k.profiles : 0)})`},
+    {label: 'Tỷ lệ mua (khách mua / hoạt động)', value: V.pct(k.conversion, 1), delta: delta(k.conversion, pv.conversion), period},
+    {label: 'Đơn đã thanh toán', value: V.compact(k.orders), delta: delta(k.orders, pv.orders), period, note: `${V.compact(k.buyers)} khách mua`},
+    {label: 'Giá trị đơn trung bình', value: V.money(k.aov), delta: delta(k.aov, pv.aov), period},
+    {label: 'Doanh thu dự đoán 30 ngày tới', value: V.money(k.predicted_revenue_30d), note: 'tổng giá trị kỳ vọng từ mô hình'},
+    {label: 'Khách có khả năng mua (≥ 50%)', value: V.compact(k.likely_buyers_30d), note: 'trong 30 ngày tới'},
+  ]);
+  V.line($('d-active'), {title: 'Khách hoạt động mỗi ngày', sub: 'Số người có ít nhất 1 điểm chạm · các ngày trọn vẹn, đến hết hôm qua',
+    points: d.daily.map(x => ({x: x.date, y: x.active})), label: 'Khách hoạt động'});
+  V.line($('d-revenue'), {title: 'Doanh thu mỗi ngày', sub: 'Đơn đã thanh toán (VNĐ) · đến hết hôm qua',
+    points: d.daily.map(x => ({x: x.date, y: x.revenue})), fmt: V.money, label: 'Doanh thu'});
+  V.funnel($('d-funnel'), {title: 'Phễu chuyển đổi', sub: `Số người đạt từng bước trong ${dashDays} ngày`, steps: d.funnel});
+  V.bars($('d-stage'), {title: 'Điểm chạm theo giai đoạn', sub: 'Nhận biết → trung thành',
+    rows: d.touchpoints_by_stage.map((r, i) => ({label: r.label, value: r.count, slot: i + 1})),
+    colorOf: r => `var(--stage-${r.slot})`});
+  const used = d.meta.channels.filter(c => d.channel_weeks.some(w => w[c.key] > 0));
+  const weekly = d.window.period_days === 7;
+  V.stacked($('d-channels'), {title: `Điểm chạm theo kênh mỗi ${weekly ? 'tuần' : 'ngày'}`,
+    sub: `Gồm cả điểm chạm do DMAG/CDP chủ động (ZNS, email, gọi điện)${weekly ? ' · mỗi cột = 7 ngày, tính lùi từ hôm nay' : ''}`,
+    categories: d.channel_weeks.map(w => w.week), catFmt: weekly ? (w => 'từ ' + V.day(w)) : V.day, catLabel: weekly ? 'Tuần bắt đầu' : 'Ngày', rows: d.channel_weeks,
+    series: used.map(c => ({key: c.key, label: c.label, slot: V.CHANNEL_SLOT[c.key]}))});
+  V.bars($('d-products'), {title: 'Dự báo sản phẩm/dịch vụ sẽ bán – 30 ngày', sub: 'Số người mua kỳ vọng (tổng xác suất)',
+    rows: d.product_forecast.slice(0, 8).map(r => ({label: r.item, value: r.expected_buyers,
+      sub: `Doanh thu kỳ vọng ${V.money(r.expected_revenue)} · ${r.likely} khách ≥ 50%`})),
+    fmt: v => V.compact(v)});
+  V.bars($('d-touch7'), {title: 'Dự báo điểm chạm 7 ngày tới', sub: 'Theo kênh – tổng xác suất từ mô hình hành trình',
+    rows: d.touchpoint_forecast_7d.filter(r => r.expected > 0).map(r => ({label: CHANNEL_LABEL[r.channel], value: r.expected, channel: r.channel})),
+    colorOf: r => V.channelColor(r.channel)});
+  V.bars($('d-attr'), {title: 'Doanh thu theo nguồn đầu tiên', sub: 'First-touch, đơn đã thanh toán',
+    rows: d.attribution.map(r => ({label: [r.source, r.campaign].filter(x => x && x !== '(none)').join(' · ') || '(trực tiếp)', value: r.revenue,
+      sub: `${r.customers} khách · ${r.orders} đơn`})), fmt: V.money});
+  V.bars($('d-segs'), {title: 'Phân khúc lớn nhất', sub: 'Số thành viên hiện tại',
+    rows: d.segments.slice(0, 8).map(r => ({label: r.name, value: r.members}))});
+  renderModels(d.models, d.tenant.simulated);
+}
+
+function renderModels(models, simulated) {
+  const box = $('d-models');
+  box.innerHTML = '';
+  const head = document.createElement('div'); head.className = 'viz-head'; box.appendChild(head);
+  const t = document.createElement('div'); head.appendChild(t);
+  t.innerHTML = '<h3>Chất lượng mô hình dự đoán</h3><div class="viz-sub">Đánh giá trên tập kiểm tra tách theo khách hàng, so với cách đoán đơn giản (baseline)</div>';
+  const nt = models.next_touchpoint, pp = models.product_propensity;
+  if (!nt && !pp) { box.insertAdjacentHTML('beforeend', '<div class="viz-empty">Chưa huấn luyện – bấm “Huấn luyện mô hình”.</div>'); return; }
+  const grid = document.createElement('div'); grid.className = 'mq'; box.appendChild(grid);
+  const block = (title, rows, foot) => {
+    const b = document.createElement('div'); grid.appendChild(b);
+    b.insertAdjacentHTML('beforeend', `<div style="font-weight:600;font-size:13px">${esc(title)}</div>`);
+    for (const r of rows) {
+      const row = document.createElement('div'); row.className = 'mq-row'; b.appendChild(row);
+      row.insertAdjacentHTML('beforeend', `<span>${esc(r.label)}</span><div class="mq-track"><i style="width:${(Math.max(0, Math.min(1, r.value || 0)) * 100).toFixed(1)}%;background:${r.color}"></i></div><b>${esc(r.text)}</b>`);
+    }
+    b.insertAdjacentHTML('beforeend', `<div class="viz-sub" style="margin-top:6px">${esc(foot)}</div>`);
+  };
+  const trained = m => m.trained_at ? new Date(m.trained_at).toLocaleString('vi-VN') : '–';
+  if (nt) {
+    const m = nt.metrics;
+    block('Điểm chạm tiếp theo – độ chính xác top-3', [
+      {label: 'Mô hình', value: m.accuracy_at_3, text: V.pct(m.accuracy_at_3, 1), color: 'var(--series-1)'},
+      {label: 'Baseline', value: m.baseline_accuracy_at_3, text: V.pct(m.baseline_accuracy_at_3, 1), color: 'var(--text-muted)'},
+    ], `Chuỗi Markov bậc 2 · ${m.customers} khách, ${m.transitions} bước chuyển · kiểm tra trên ${m.test_customers} khách · baseline: luôn đoán 3 điểm chạm phổ biến nhất · huấn luyện ${trained(nt)}`);
+  }
+  if (pp) {
+    const m = pp.metrics;
+    block('Khả năng mua sản phẩm/dịch vụ – AUC', [
+      {label: 'Mô hình', value: m.auc, text: m.auc == null ? '–' : m.auc.toFixed(3).replace('.', ','), color: 'var(--series-1)'},
+      {label: 'Baseline', value: m.baseline_auc_popularity, text: m.baseline_auc_popularity == null ? '–' : m.baseline_auc_popularity.toFixed(3).replace('.', ','), color: 'var(--text-muted)'},
+    ], `${m.mode === 'logistic_regression' ? 'Hồi quy logistic' : 'Trọng số quy tắc (chưa đủ lịch sử mua)'} · ${m.rows} mẫu, ${m.positives} lần mua · kiểm tra ${m.test_rows} mẫu / ${m.test_positives} lần mua${(m.test_positives || 0) < 30 ? ' (ít – số liệu còn dao động)' : ''} · baseline: xếp theo độ phổ biến · huấn luyện ${trained(pp)}`);
+  }
+  const lg = document.createElement('div'); lg.className = 'viz-legend'; box.appendChild(lg);
+  lg.innerHTML = '<span><i style="background:var(--series-1)"></i>Mô hình CDP</span><span><i style="background:var(--text-muted)"></i>Baseline</span>';
+  if (simulated) box.insertAdjacentHTML('beforeend', '<div class="viz-sub" style="margin-top:8px"><span class="badge">Lưu ý</span> Dữ liệu mô phỏng đi theo kịch bản nên rất dễ đoán – điểm số ở đây chỉ chứng minh pipeline huấn luyện/đánh giá chạy đúng, <b>không</b> phải độ chính xác trên khách thật. Số thật sẽ có sau khi chạy trên dữ liệu DMAG.</div>');
+}
+
 init();
 </script>
 </body>

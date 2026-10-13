@@ -8,10 +8,10 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import activation, analytics, destinations, segments as seg
+from . import activation, analytics, destinations, predict, segments as seg
 from .db import session_scope
 from . import security
-from .models import Entity, Profile, Segment, SegmentMember, Tenant, utcnow
+from .models import Entity, MLModel, Profile, Segment, SegmentMember, Tenant, utcnow
 from .traits import parse_dt
 from .pipeline import refresh_profile
 
@@ -69,9 +69,12 @@ def run_once(tenant_id: str | None = None, push: bool = True, client: httpx.Clie
                 last = parse_dt((tenant.settings or {}).get("last_reconcile_at"))
                 if tenant.odoo_url and (last is None or utcnow() - last > timedelta(hours=24)):
                     due_reconcile[tenant.id] = last
+                trained = maybe_train(session, tenant)
                 refresh_tenant(session, tenant)
                 session.flush()
                 results[tenant.id] = activation.push_tenant(session, tenant, client) if push else {}
+                if trained:
+                    results[tenant.id]["models_trained"] = trained
                 if push:
                     results[tenant.id]["destinations"] = destinations.run(session, tenant, client)
         if push:
@@ -148,3 +151,16 @@ def reconcile(tenant_id: str, client: httpx.Client | None = None, models=RECONCI
         if own:
             client.close()
     return out
+
+
+def maybe_train(session: Session, tenant: Tenant, max_age_hours: int = 24) -> dict | None:
+    """Retrain prediction models once a day (and as soon as there is data to learn from)."""
+    row = session.get(MLModel, (tenant.id, "next_touchpoint"))
+    if row is not None and utcnow() - row.trained_at.replace(tzinfo=row.trained_at.tzinfo or utcnow().tzinfo) \
+            < timedelta(hours=max_age_hours):
+        return None
+    try:
+        return predict.train(session, tenant)
+    except Exception:  # a training failure must never stop activation
+        _logger.exception("Model training failed for %s", tenant.id)
+        return None
