@@ -1,0 +1,77 @@
+# CDP Core stack. Copy .env.example to .env and set real secrets first.
+#   docker compose up -d                    # PostgreSQL + ClickHouse + API + consumer + worker
+#   docker compose --profile kafka up -d    # + Redpanda (set CDP_QUEUE_BACKEND=kafka in .env)
+# Odoo (Bizapp hosting) is not part of this stack: install odoo_addons/ there.
+name: dmag-cdp
+
+x-core: &core
+  build:
+    context: .
+    dockerfile: core/Dockerfile
+  image: dmag/cdp-core:latest
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    CDP_DATABASE_URL: postgresql+psycopg://cdp:${POSTGRES_PASSWORD}@postgres:5432/cdp
+    CDP_CLICKHOUSE_URL: http://cdp:${CLICKHOUSE_PASSWORD}@clickhouse:8123/cdp
+    CDP_KAFKA_BOOTSTRAP: redpanda:9092
+  depends_on:
+    postgres:
+      condition: service_healthy
+    clickhouse:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cdp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: cdp
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cdp -d cdp"]
+      interval: 5s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8.4.13
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: cdp
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: cdp
+    volumes: [chdata:/var/lib/clickhouse]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      retries: 30
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    profiles: [kafka]
+    restart: unless-stopped
+    command: >
+      redpanda start --overprovisioned --smp 1 --memory 1G --reserve-memory 0M --node-id 0 --check=false
+      --kafka-addr PLAINTEXT://0.0.0.0:9092 --advertise-kafka-addr PLAINTEXT://redpanda:9092
+    volumes: [rpdata:/var/lib/redpanda/data]
+
+  cdp-api:
+    <<: *core
+    ports: ["${CDP_PORT:-8000}:8000"]
+
+  cdp-consumer:
+    <<: *core
+    command: ["python", "-m", "cdp_core.consumer"]
+    healthcheck: {disable: true}
+
+  cdp-worker:
+    <<: *core
+    command: ["python", "-m", "cdp_core.worker", "--interval", "30"]
+    healthcheck: {disable: true}
+
+volumes:
+  pgdata:
+  chdata:
+  rpdata:
