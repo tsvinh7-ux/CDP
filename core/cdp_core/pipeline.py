@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from . import consent, identity, privacy, security, segments as seg
 from .models import Activation, Entity, Event, Profile, Segment, SegmentMember, Tenant, utcnow
 from .normalize import normalize_email, normalize_phone
-from .traits import clinic_summary, compute_account, compute_person, parse_dt
+from .traits import clinic_summary, compute_account, compute_person, parse_dt, recommend
 
 SUPPORTED_MAJOR = "1"
 ODOO_KINDS = {"event", "entity.upserted", "entity.deleted"}
@@ -57,6 +57,17 @@ def _subject_identifiers(subject: dict) -> list[tuple[str, str]]:
     return [(k, str(v)) for k, v in ids if v]
 
 
+def _catalog(session: Session, tenant_id: str) -> dict:
+    """Course catalog from Odoo snapshots (slide.channel), cached for the session's lifetime."""
+    cache = session.info.setdefault("cdp_catalog", {})
+    if tenant_id not in cache:
+        rows = session.scalars(select(Entity).where(Entity.tenant_id == tenant_id, Entity.model == "slide.channel",
+                                                    Entity.deleted.is_(False))).all()
+        cache[tenant_id] = {str(e.res_id): {"name": e.fields.get("name"), "tags": e.fields.get("tag_ids_names") or [],
+                                            "published": e.fields.get("is_published", True)} for e in rows}
+    return cache[tenant_id]
+
+
 def _partner_fields(session: Session, tenant_id: str, partner_id: int | None) -> dict | None:
     if not partner_id:
         return None
@@ -93,6 +104,9 @@ def refresh_profile(session: Session, tenant: Tenant, profile: Profile, now: dat
     if profile.account_partner_id:
         account = identity.resolve(session, tenant.id, [], partner_id=profile.account_partner_id, kind="account")
         traits["clinic"] = clinic_summary(account.traits or {})
+    catalog = _catalog(session, tenant.id)
+    if catalog:
+        traits.update(recommend(traits, catalog, cfg))
     _set_traits(profile, traits, now)
     evaluate_segments(session, tenant, profile, now)
 
@@ -112,10 +126,14 @@ def _refresh_account(session: Session, tenant: Tenant, account: Profile, now: da
     traits = compute_account(_partner_fields(session, tenant.id, account.partner_id), members)
     _set_traits(account, traits, now)
     summary = clinic_summary(traits)
+    catalog = _catalog(session, tenant.id)
     # Owners are targeted by Marketing Automation with clinic-level signals.
     for m in members:
         if (m.traits or {}).get("clinic") != summary:
-            _set_traits(m, {**(m.traits or {}), "clinic": summary}, now)
+            updated = {**(m.traits or {}), "clinic": summary}
+            if catalog:
+                updated.update(recommend(updated, catalog, tenant.settings or {}))
+            _set_traits(m, updated, now)
             evaluate_segments(session, tenant, m, now)
 
 
@@ -217,6 +235,8 @@ def _apply_odoo(session: Session, tenant: Tenant, msg: dict, ev: Event) -> Profi
             return None  # out-of-order older snapshot
         ent.fields = props.get("fields") or {}
         ent.seq = seq
+        if obj["model"] == "slide.channel":
+            session.info.pop("cdp_catalog", None)
         ent.deleted = False
         ent.updated_at = utcnow()
         if obj["model"] == "res.partner":

@@ -20,7 +20,8 @@ def create_tenant(session: Session, tenant_id: str, name: str, secret: str, writ
                     odoo_url=odoo_url, settings=settings or {})
     session.add(tenant)
     cfg = settings or {}
-    for s in seg.default_segments(int(cfg.get("abandon_minutes", 60)), int(cfg.get("transfer_minutes", 30))):
+    for s in seg.default_segments(int(cfg.get("abandon_minutes", 60)), int(cfg.get("transfer_minutes", 30)),
+                                  cfg.get("vertical", "education")):
         session.add(Segment(tenant_id=tenant_id, key=s["key"], name=s["name"],
                             description=s.get("description"), rule=s["rule"],
                             trigger_on_enter=s.get("trigger_on_enter", False)))

@@ -74,6 +74,16 @@ def _label(event) -> str:
         "lesson.completed": f"Hoàn thành bài {p.get('lesson_name') or ''}",
         "certificate.issued": f"Nhận chứng chỉ {name}",
         "lead.created": "Tạo lead CRM",
+        "appointment.booked": f"Đặt lịch hẹn {p.get('service_group') or ''} {(p.get('scheduled_at') or '')[:16]}",
+        "appointment.checked_in": "Đến khám",
+        "appointment.no_show": "Không đến theo lịch hẹn",
+        "appointment.cancelled": "Hủy lịch hẹn",
+        "treatment_plan.proposed": f"Được tư vấn kế hoạch điều trị {_money(p.get('amount'))}",
+        "treatment_plan.accepted": f"Đồng ý kế hoạch điều trị {_money(p.get('amount'))}",
+        "treatment_plan.declined": "Từ chối kế hoạch điều trị",
+        "procedure.completed": f"Hoàn thành {p.get('service_group') or 'thủ thuật'}",
+        "installment.overdue": f"Trễ hạn trả góp {_money(p.get('amount'))}",
+        "installment.paid": f"Thanh toán trả góp {_money(p.get('amount'))}",
         "zalo.follow": "Quan tâm Zalo OA",
         "zalo.unfollow": "Bỏ quan tâm Zalo OA",
         "zalo.user_send_text": "Nhắn tin cho Zalo OA",
@@ -242,6 +252,9 @@ def compute_person(partner_fields: dict | None, events: list, now: datetime, cfg
         engagement += 20
     t["engagement_score"] = min(100, engagement)
 
+    t.update(compute_dental(events, now, cfg))
+    t["lead_score"], t["lead_score_reasons"] = lead_score(t, now)
+
     t["timeline"] = [
         {"at": iso(ev.occurred_at), "type": ev.event_type, "label": _label(ev)}
         for ev in sorted(events, key=lambda e: aware(e.occurred_at), reverse=True)[:15]
@@ -296,3 +309,172 @@ CLINIC_SUMMARY_KEYS = ("name", "staff_count", "learners_count", "staff_course_ta
 
 def clinic_summary(account_traits: dict) -> dict:
     return {k: account_traits.get(k) for k in CLINIC_SUMMARY_KEYS}
+
+
+# --------------------------------------------------------------------------- scoring & recommendations
+
+def lead_score(t: dict, now: datetime) -> tuple[int, list[str]]:
+    """Explainable 0–100 purchase-intent score (rules; to be replaced by a model trained on outcomes)."""
+    score, reasons = 0, []
+
+    def add(points, reason):
+        nonlocal score
+        score += points
+        reasons.append(f"+{points} {reason}")
+
+    if t.get("hot_courses"):
+        add(25, "xem nhiều lần một khóa chưa mua")
+        extra = max(c.get("views", 0) for c in t["hot_courses"]) - 3
+        if extra > 0:
+            add(min(10, extra * 2), "lượt xem lặp lại")
+    if t.get("open_cart"):
+        add(25, "có giỏ hàng chưa thanh toán")
+    if t.get("awaiting_payment"):
+        add(20, "đã đặt đơn, chờ thanh toán")
+    seen = parse_dt(t.get("last_seen_at"))
+    if seen and seen >= now - timedelta(days=3):
+        add(10, "hoạt động trong 3 ngày")
+    elif seen and seen >= now - timedelta(days=14):
+        add(5, "hoạt động trong 14 ngày")
+    if t.get("job_role") == "clinic_owner":
+        add(10, "chủ phòng khám (người quyết định)")
+    elif t.get("job_role") == "dentist":
+        add(5, "bác sĩ")
+    if (t.get("first_touch") or {}).get("medium") in ("cpc", "paid", "ads"):
+        add(5, "đến từ quảng cáo")
+    engagement = int((t.get("engagement_score") or 0) * 0.2)
+    if engagement:
+        add(engagement, "mức độ tương tác")
+    return min(100, score), reasons
+
+
+def recommend(t: dict, catalog: dict, cfg: dict) -> dict:
+    """Next course(s) for a person, and for a clinic owner the next course for the clinic's staff.
+
+    catalog: {course_id(str): {"name", "tags": [...], "published": bool}}
+    Level progression uses the tenant's level tags (default "Cơ bản" → "Nâng cao").
+    """
+    basic, advanced = (cfg.get("levels") or ["Cơ bản", "Nâng cao"])[:2]
+    levels = {basic, advanced}
+    enrolled = {str(c["id"]) for c in t.get("courses_enrolled") or []}
+    completed = {str(c) for c in t.get("courses_completed") or []}
+    live = {cid: c for cid, c in catalog.items() if c.get("published", True)}
+
+    def topics(cid):
+        return set(live.get(cid, catalog.get(cid, {})).get("tags") or []) - levels
+
+    def next_level(taken: set[str]) -> dict[str, tuple[float, str]]:
+        out = {}
+        for cid in taken:
+            course = catalog.get(cid) or {}
+            if basic not in (course.get("tags") or []):
+                continue
+            for other, oc in live.items():
+                if other in taken or advanced not in (oc.get("tags") or []) or not (topics(cid) & topics(other)):
+                    continue
+                score = 3 + (1 if cid in completed else 0)
+                out[other] = max(out.get(other, (0, "")), (score, f"học tiếp sau {course.get('name')}"))
+        return out
+
+    scored = next_level(enrolled)
+    for c in t.get("hot_courses") or []:
+        cid = str(c["id"])
+        if cid in live and cid not in enrolled:
+            scored[cid] = max(scored.get(cid, (0, "")), (2 + c.get("views", 0) / 10, "đang quan tâm"))
+    for c in (t.get("clinic") or {}).get("staff_courses") or []:
+        cid = str(c["id"])
+        if cid in live and cid not in enrolled:
+            scored[cid] = max(scored.get(cid, (0, "")), (1, "đồng nghiệp ở phòng khám đã học"))
+    ranked = sorted(scored.items(), key=lambda kv: -kv[1][0])[:3]
+    out = {"next_courses": [{"id": cid, "name": live[cid]["name"], "reason": r} for cid, (_s, r) in ranked]}
+    out["next_best_course"] = out["next_courses"][0] if ranked else None
+
+    clinic = t.get("clinic") or {}
+    if t.get("job_role") == "clinic_owner" and clinic.get("staff_courses"):
+        staff_taken = {str(c["id"]) for c in clinic["staff_courses"]}
+        ranked = sorted(next_level(staff_taken).items(), key=lambda kv: -kv[1][0])
+        out["clinic_next_course"] = ({"id": ranked[0][0], "name": live[ranked[0][0]]["name"],
+                                      "reason": "nhân sự đã học khóa cơ bản cùng chủ đề"} if ranked else None)
+    return out
+
+
+# --------------------------------------------------------------------------- dental vertical
+
+DEFAULT_RECALL_MONTHS = {"scaling": 6, "ortho_check": 1, "implant_check": 12, "whitening": 12, "checkup": 6}
+DENTAL_EVENTS = ("appointment.", "treatment_plan.", "procedure.", "installment.")
+
+
+def compute_dental(events: list, now: datetime, cfg: dict) -> dict:
+    """Patient traits from Dental ERP events (data contract §5.3; no clinical data)."""
+    appts: dict = {}
+    plans: dict = {}
+    last_by_group: dict = {}
+    installments: dict = {}
+    branches: set = set()
+    value = 0.0
+    for ev in events:
+        et = ev.event_type
+        if not et.startswith(DENTAL_EVENTS):
+            continue
+        p = (ev.payload or {}).get("properties") or {}
+        at = aware(ev.occurred_at)
+        if p.get("branch_id"):
+            branches.add(str(p["branch_id"]))
+        if et.startswith("appointment."):
+            a = appts.setdefault(str(p.get("appointment_id")), {})
+            a["status"] = et.split(".", 1)[1]
+            if p.get("scheduled_at"):
+                a["scheduled_at"] = p["scheduled_at"]
+            a["service_group"] = p.get("service_group") or a.get("service_group")
+            if a["status"] == "checked_in":
+                a["visited_at"] = iso(at)
+        elif et.startswith("treatment_plan."):
+            plan = plans.setdefault(str(p.get("plan_id")), {"plan_id": p.get("plan_id")})
+            plan["status"] = et.split(".", 1)[1]
+            plan["amount"] = p.get("amount", plan.get("amount"))
+            plan["service_groups"] = p.get("service_groups") or plan.get("service_groups")
+            if plan["status"] == "proposed":
+                plan["proposed_at"] = iso(at)
+        elif et == "procedure.completed":
+            group = p.get("service_group") or "other"
+            last_by_group[group] = max(last_by_group.get(group) or iso(at), iso(at))
+            value += float(p.get("amount") or 0)
+        elif et.startswith("installment."):
+            key = f"{p.get('plan_id')}:{p.get('due_date')}"
+            installments[key] = {"plan_id": p.get("plan_id"), "due_date": p.get("due_date"),
+                                 "amount": p.get("amount"), "status": et.split(".", 1)[1]}
+    if not (appts or plans or last_by_group or installments):
+        return {}
+
+    upcoming = sorted(a["scheduled_at"] for a in appts.values()
+                      if a.get("status") in ("booked", "rescheduled") and a.get("scheduled_at")
+                      and parse_dt(a["scheduled_at"]) >= now)
+    visits = [parse_dt(a["visited_at"]) for a in appts.values() if a.get("visited_at")]
+    visits += [parse_dt(v) for v in last_by_group.values()]
+    no_shows = sum(1 for a in appts.values() if a.get("status") == "no_show")
+    closed = sum(1 for a in appts.values() if a.get("status") in ("no_show", "checked_in"))
+    recall_months = {**DEFAULT_RECALL_MONTHS, **(cfg.get("recall_months") or {})}
+    recall_due = []
+    if not upcoming:
+        for group, last in last_by_group.items():
+            months = recall_months.get(group)
+            if months and parse_dt(last) + timedelta(days=30 * months) <= now:
+                recall_due.append({"service_group": group, "last_at": last,
+                                   "due_since": iso(parse_dt(last) + timedelta(days=30 * months))})
+    return {
+        "patient": True,
+        "next_appointment_at": upcoming[0] if upcoming else None,
+        "last_visit_at": iso(max(visits)) if visits else None,
+        "appointments_count": len(appts),
+        "no_show_count": no_shows,
+        "no_show_rate": round(no_shows / closed, 2) if closed else 0,
+        "open_treatment_plans": sorted(
+            ({k: v for k, v in pl.items() if k != "status"} for pl in plans.values() if pl.get("status") == "proposed"),
+            key=lambda pl: pl.get("proposed_at") or ""),
+        "accepted_plans": sum(1 for pl in plans.values() if pl.get("status") == "accepted"),
+        "last_procedure_by_group": last_by_group,
+        "recall_due": recall_due,
+        "installments_overdue": [i for i in installments.values() if i["status"] == "overdue"],
+        "treatment_value": int(value),
+        "branches": sorted(branches),
+    }

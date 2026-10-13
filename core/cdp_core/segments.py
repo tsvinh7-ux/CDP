@@ -56,12 +56,14 @@ def _cond(cond: dict, traits: dict, now: datetime) -> bool:
         except (TypeError, ValueError):
             return False
         return {"gt": v > target, "gte": v >= target, "lt": v < target, "lte": v <= target}[op]
-    if op in ("older_than_minutes", "within_days"):
+    if op in ("older_than_minutes", "within_days", "in_next_days"):
         dt = parse_dt(v)
         if dt is None:
             return False
         if op == "older_than_minutes":
             return dt <= now - timedelta(minutes=float(target))
+        if op == "in_next_days":
+            return now <= dt <= now + timedelta(days=float(target))
         return dt >= now - timedelta(days=float(target))
     raise ValueError(f"Unknown operator {op!r}")
 
@@ -89,8 +91,77 @@ def referenced_traits(rule: dict) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def default_segments(abandon_minutes: int = 60, transfer_minutes: int = 30) -> list[dict]:
-    """Starter segments for an education tenant (DMAG)."""
+OPERATORS = {
+    "eq": "bằng", "ne": "khác", "gt": ">", "gte": "≥", "lt": "<", "lte": "≤", "in": "thuộc danh sách",
+    "contains": "chứa", "not_contains": "không chứa", "exists": "có giá trị", "not_exists": "không có giá trị",
+    "empty": "rỗng", "not_empty": "không rỗng", "older_than_minutes": "cũ hơn (phút)",
+    "within_days": "trong vòng (ngày qua)", "in_next_days": "trong (ngày tới)",
+}
+
+# Traits offered by the segment builder (path, label, kind).
+TRAIT_CATALOG = [
+    ("job_role", "Vai trò (clinic_owner, dentist, assistant…)", "text"),
+    ("rfm_segment", "Nhóm RFM", "text"),
+    ("total_spent", "Tổng chi tiêu (đ)", "number"),
+    ("orders_count", "Số đơn đã thanh toán", "number"),
+    ("lead_score", "Điểm lead (0–100)", "number"),
+    ("engagement_score", "Điểm tương tác (0–100)", "number"),
+    ("last_seen_at", "Lần hoạt động gần nhất", "date"),
+    ("last_order_at", "Lần mua gần nhất", "date"),
+    ("course_tags_enrolled", "Thẻ khóa đã học", "list"),
+    ("hot_courses", "Khóa đang quan tâm", "list"),
+    ("stalled_courses", "Khóa học dở", "list"),
+    ("open_cart", "Giỏ hàng chưa thanh toán", "object"),
+    ("open_cart.updated_at", "Giỏ hàng cập nhật lúc", "date"),
+    ("awaiting_payment", "Đơn chờ thanh toán", "list"),
+    ("first_touch.source", "Nguồn đầu tiên (utm_source)", "text"),
+    ("first_touch.campaign", "Chiến dịch đầu tiên", "text"),
+    ("zalo_follower", "Đang quan tâm Zalo OA", "bool"),
+    ("consent.marketing", "Đồng ý nhận tin tiếp thị", "bool"),
+    ("consent.ads", "Đồng ý quảng cáo", "bool"),
+    ("clinic.name", "Tên phòng khám", "text"),
+    ("clinic.staff_count", "Số nhân sự phòng khám", "number"),
+    ("clinic.learners_count", "Số nhân sự đã học", "number"),
+    ("clinic.staff_course_tags", "Thẻ khóa nhân sự đã học", "list"),
+    ("next_best_course.name", "Khóa gợi ý tiếp theo", "text"),
+    ("clinic_next_course.name", "Khóa gợi ý cho phòng khám", "text"),
+    ("next_appointment_at", "Lịch hẹn sắp tới (nha khoa)", "date"),
+    ("last_visit_at", "Lần khám gần nhất (nha khoa)", "date"),
+    ("no_show_rate", "Tỷ lệ không đến (nha khoa)", "number"),
+    ("open_treatment_plans", "Kế hoạch điều trị chưa chốt", "list"),
+    ("recall_due", "Đến hạn tái khám", "list"),
+    ("installments_overdue", "Trả góp quá hạn", "list"),
+    ("treatment_value", "Giá trị điều trị (đ)", "number"),
+]
+
+
+def dental_segments() -> list[dict]:
+    """Starter segments for a dental clinic tenant (Dental ERP add-on)."""
+    return [
+        {"key": "recall_due", "name": "Đến hạn tái khám định kỳ",
+         "description": "Cạo vôi 6 tháng, tái khám niềng, kiểm tra implant… chưa có lịch hẹn.",
+         "rule": {"trait": "recall_due", "op": "not_empty"}, "trigger_on_enter": True},
+        {"key": "no_show_risk", "name": "Có lịch hẹn 2 ngày tới, hay vắng mặt",
+         "description": "Gọi xác nhận trước để giảm ghế trống.",
+         "rule": {"all": [{"trait": "next_appointment_at", "op": "in_next_days", "value": 2},
+                          {"trait": "no_show_rate", "op": "gte", "value": 0.3}]}, "trigger_on_enter": True},
+        {"key": "plan_not_accepted", "name": "Kế hoạch điều trị chưa chốt > 3 ngày",
+         "rule": {"all": [{"trait": "open_treatment_plans", "op": "not_empty"},
+                          {"trait": "open_treatment_plans.0.proposed_at", "op": "older_than_minutes", "value": 4320}]},
+         "trigger_on_enter": True},
+        {"key": "installment_overdue", "name": "Trả góp quá hạn",
+         "rule": {"trait": "installments_overdue", "op": "not_empty"}, "trigger_on_enter": True},
+        {"key": "lapsed_patients", "name": "Không quay lại > 12 tháng",
+         "rule": {"trait": "last_visit_at", "op": "older_than_minutes", "value": 525600}},
+        {"key": "high_value_patients", "name": "Bệnh nhân giá trị cao (≥ 50 triệu)",
+         "rule": {"trait": "treatment_value", "op": "gte", "value": 50_000_000}},
+    ]
+
+
+def default_segments(abandon_minutes: int = 60, transfer_minutes: int = 30, vertical: str = "education") -> list[dict]:
+    """Starter segments for a tenant."""
+    if vertical == "dental":
+        return dental_segments()
     return [
         {
             "key": "clinic_owners",
@@ -145,5 +216,12 @@ def default_segments(abandon_minutes: int = 60, transfer_minutes: int = 30) -> l
             "key": "high_value",
             "name": "Chi tiêu ≥ 10 triệu",
             "rule": {"trait": "total_spent", "op": "gte", "value": 10_000_000},
+        },
+        {
+            "key": "high_lead_score",
+            "name": "Điểm lead ≥ 60",
+            "description": "Ưu tiên sales gọi trong ngày.",
+            "rule": {"trait": "lead_score", "op": "gte", "value": 60},
+            "trigger_on_enter": True,
         },
     ]
