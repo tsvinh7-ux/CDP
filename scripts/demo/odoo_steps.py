@@ -197,8 +197,9 @@ def touchpoints():
     lead.activity_schedule(activity_type_id=call.id, summary="Tư vấn gói đội ngũ",
                            user_id=env.ref("base.user_admin").id).action_feedback(feedback="Hẹn demo tuần sau")
     now = fields.Datetime.now()
+    # No automatic confirmation/ticket mails: the demo machine has no wkhtmltopdf for the PDF ticket.
     webinar = env["event.event"].create({"name": "Webinar: Implant tức thì", "date_begin": now - timedelta(hours=3),
-                                         "date_end": now - timedelta(hours=1)})
+                                         "date_end": now - timedelta(hours=1), "event_mail_ids": [(5, 0, 0)]})
     env["event.registration"].create({"event_id": webinar.id, "partner_id": minh.id}).action_set_done()
     mailing = env["mailing.mailing"].create({
         "subject": "Ưu đãi Implant Nâng cao tháng 10", "body_html": "<p>Ưu đãi</p>",
