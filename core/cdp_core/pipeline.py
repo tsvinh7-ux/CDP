@@ -312,3 +312,38 @@ def ingest_web_batch(session: Session, tenant: Tenant, batch: list[dict]) -> dic
         if profile is not None:
             refresh_profile(session, tenant, profile, now)
     return result
+
+
+# --------------------------------------------------------------------------- Zalo OA webhook
+
+def ingest_zalo(session: Session, tenant: Tenant, oa_id: str, body: dict) -> dict:
+    """One Zalo OA webhook event (follow, unfollow, user message, user_submit_info...)."""
+    name = body.get("event_name") or "unknown"
+    uid = ((body.get("follower") or {}).get("id") or (body.get("sender") or {}).get("id")
+           or body.get("user_id_by_app"))
+    if not uid:
+        return {"ignored": name}
+    ids = [("zalo", f"{oa_id}:{uid}")]
+    info = body.get("info") or {}
+    phone = normalize_phone(info.get("phone"))
+    if phone:
+        ids.append(("phone", phone))  # the user chose to share it with the OA
+    try:
+        occurred = datetime.fromtimestamp(int(body.get("timestamp")) / 1000, tz=utcnow().tzinfo)
+    except (TypeError, ValueError):
+        occurred = utcnow()
+    msg_id = (body.get("message") or {}).get("msg_id")
+    event_id = f"zalo:{msg_id}" if msg_id else f"zalo:{name}:{uid}:{body.get('timestamp')}"
+    # Message texts are not stored: only the fact that the user interacted.
+    payload = {"properties": {"event_name": name, "oa_id": oa_id, "shared_phone": bool(phone)},
+               "context": {"zalo_uid": uid}}
+    ev = _store_event(session, tenant, event_id, "zalo", "track", f"zalo.{name}", occurred, payload)
+    if ev is None:
+        return {"duplicate": True}
+    profile = identity.resolve(session, tenant.id, ids)
+    if privacy.is_erased(profile):
+        session.delete(ev)
+        return {"ignored": "erased"}
+    ev.profile_id = profile.id
+    refresh_profile(session, tenant, identity.canonical(session, profile.id))
+    return {"accepted": True, "profile_id": profile.id}

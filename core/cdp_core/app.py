@@ -10,10 +10,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 
-from . import jobs, pipeline, security
+from . import consent, destinations, jobs, pipeline, privacy, secrets, security
 from .config import settings
 from .db import init_db, session_scope
-from .models import Event, MergeSuggestion, Profile, Segment, Tenant
+from .destinations.zalo import verify_webhook
+from .models import Delivery, Destination, Event, MergeSuggestion, PrivacyRequest, Profile, Segment, Tenant
 from .traits import iso
 
 _logger = logging.getLogger(__name__)
@@ -239,3 +240,137 @@ def merge_suggestions(tenant: str):
 @app.post("/v1/admin/run-jobs", dependencies=[Depends(admin)])
 def run_jobs(tenant: str | None = None, push: bool = True):
     return JSONResponse(jobs.run_once(tenant, push=push))
+
+
+# --------------------------------------------------------------------------- Zalo OA webhook
+
+@app.post("/v1/webhooks/zalo/{tenant_id}")
+async def zalo_webhook(tenant_id: str, request: Request, x_zevent_signature: str = Header(None)):
+    raw = await request.body()
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        raise HTTPException(400, "invalid JSON")
+    with session_scope() as s:
+        tenant = s.get(Tenant, tenant_id)
+        dest = s.scalar(select(Destination).where(Destination.tenant_id == tenant_id,
+                                                  Destination.type == "zalo_zns")) if tenant else None
+        if dest is None:
+            raise HTTPException(404, "no Zalo destination")
+        cfg = dest.config or {}
+        oa_secret = secrets.decrypt((cfg.get("secrets") or {}).get("oa_secret_key"))
+        if not verify_webhook(cfg.get("app_id"), oa_secret, raw, str(body.get("timestamp")), x_zevent_signature):
+            raise HTTPException(401, "invalid signature")
+        oa_id = cfg.get("oa_id") or str((body.get("recipient") or {}).get("id") or "")
+        return pipeline.ingest_zalo(s, tenant, oa_id, body)
+
+
+# --------------------------------------------------------------------------- destinations (admin)
+
+class DestinationIn(BaseModel):
+    type: str
+    name: str
+    config: dict = {}
+    secrets: dict = {}
+    enabled: bool = True
+
+
+def _dest_doc(d: Destination) -> dict:
+    return {"id": d.id, "type": d.type, "name": d.name, "enabled": d.enabled, "config": secrets.mask(d.config or {}),
+            "last_error": d.last_error,
+            "state": {k: v for k, v in (d.state or {}).items() if k not in ("access_token", "refresh_token")}}
+
+
+@app.get("/v1/admin/destinations", dependencies=[Depends(admin)])
+def list_destinations(tenant: str):
+    with session_scope() as s:
+        rows = s.scalars(select(Destination).where(Destination.tenant_id == tenant).order_by(Destination.id)).all()
+        out = []
+        for d in rows:
+            doc = _dest_doc(d)
+            doc["deliveries"] = dict(s.execute(select(Delivery.status, func.count()).where(
+                Delivery.destination_id == d.id).group_by(Delivery.status)).all())
+            out.append(doc)
+        return out
+
+
+@app.post("/v1/admin/destinations", dependencies=[Depends(admin)])
+def create_destination(tenant: str, body: DestinationIn):
+    with session_scope() as s:
+        try:
+            d = destinations.create(s, tenant, body.type, body.name, body.config, body.secrets)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        d.enabled = body.enabled
+        return _dest_doc(d)
+
+
+@app.put("/v1/admin/destinations/{dest_id}", dependencies=[Depends(admin)])
+def update_destination(dest_id: int, body: DestinationIn):
+    with session_scope() as s:
+        d = s.get(Destination, dest_id)
+        if d is None:
+            raise HTTPException(404)
+        kept = dict((d.config or {}).get("secrets") or {})
+        kept.update(secrets.seal(body.secrets))  # empty values keep the stored secret
+        d.name, d.enabled, d.config = body.name, body.enabled, {**body.config, "secrets": kept}
+        return _dest_doc(d)
+
+
+@app.get("/v1/admin/deliveries", dependencies=[Depends(admin)])
+def list_deliveries(tenant: str, limit: int = 50):
+    with session_scope() as s:
+        rows = s.scalars(select(Delivery).where(Delivery.tenant_id == tenant)
+                         .order_by(desc(Delivery.id)).limit(min(limit, 500))).all()
+        return [{"id": d.id, "destination_id": d.destination_id, "kind": d.kind, "profile_id": d.profile_id,
+                 "purpose": d.purpose, "status": d.status, "reason": d.reason, "created_at": iso(d.created_at),
+                 "sent_at": iso(d.sent_at)} for d in rows]
+
+
+# --------------------------------------------------------------------------- privacy (admin)
+
+class ConsentIn(BaseModel):
+    purpose: str
+    granted: bool
+    channel: str | None = "admin"
+    evidence: str | None = None
+
+
+@app.post("/v1/admin/profiles/{profile_id}/consent", dependencies=[Depends(admin)])
+def set_consent(profile_id: str, body: ConsentIn):
+    with session_scope() as s:
+        p = s.get(Profile, profile_id)
+        if p is None:
+            raise HTTPException(404)
+        if not consent.record(s, p.tenant_id, p.id, body.purpose, body.granted, body.channel, "admin", body.evidence):
+            raise HTTPException(400, "unknown purpose or stale decision")
+        pipeline.refresh_profile(s, s.get(Tenant, p.tenant_id), p)
+        return {"consent": (p.traits or {}).get("consent")}
+
+
+@app.get("/v1/admin/profiles/{profile_id}/export", dependencies=[Depends(admin)])
+def export_profile(profile_id: str):
+    with session_scope() as s:
+        p = s.get(Profile, profile_id)
+        if p is None:
+            raise HTTPException(404)
+        return privacy.export(s, s.get(Tenant, p.tenant_id), p)
+
+
+@app.post("/v1/admin/profiles/{profile_id}/erase", dependencies=[Depends(admin)])
+def erase_profile(profile_id: str):
+    with session_scope() as s:
+        p = s.get(Profile, profile_id)
+        if p is None:
+            raise HTTPException(404)
+        return privacy.erase(s, s.get(Tenant, p.tenant_id), p)
+
+
+@app.get("/v1/admin/privacy-requests", dependencies=[Depends(admin)])
+def privacy_requests(tenant: str):
+    with session_scope() as s:
+        rows = s.scalars(select(PrivacyRequest).where(PrivacyRequest.tenant_id == tenant)
+                         .order_by(desc(PrivacyRequest.id)).limit(200)).all()
+        return [{"id": r.id, "kind": r.kind, "partner_id": r.partner_id, "source": r.source,
+                 "requested_at": iso(r.requested_at), "completed_at": iso(r.completed_at),
+                 "details": r.details} for r in rows]

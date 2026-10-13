@@ -24,6 +24,12 @@ class Settings:
     embedded_worker: bool = field(
         default_factory=lambda: os.environ.get("CDP_EMBEDDED_WORKER", "0") == "1"
     )
+    # Fernet key (base64, 32 bytes) encrypting destination secrets. Generate with
+    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    master_key: str = field(default_factory=lambda: os.environ.get("CDP_MASTER_KEY", ""))
+    # "inline": process requests synchronously; "queue": acknowledge, store, process in the consumer.
+    ingest_mode: str = field(default_factory=lambda: os.environ.get("CDP_INGEST_MODE", "inline"))
+    clickhouse_url: str = field(default_factory=lambda: os.environ.get("CDP_CLICKHOUSE_URL", ""))
     worker_interval: float = field(
         default_factory=lambda: float(os.environ.get("CDP_WORKER_INTERVAL", "10"))
     )

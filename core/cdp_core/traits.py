@@ -74,6 +74,11 @@ def _label(event) -> str:
         "lesson.completed": f"Hoàn thành bài {p.get('lesson_name') or ''}",
         "certificate.issued": f"Nhận chứng chỉ {name}",
         "lead.created": "Tạo lead CRM",
+        "zalo.follow": "Quan tâm Zalo OA",
+        "zalo.unfollow": "Bỏ quan tâm Zalo OA",
+        "zalo.user_send_text": "Nhắn tin cho Zalo OA",
+        "zalo.user_submit_info": "Chia sẻ thông tin qua Zalo OA",
+        "consent.updated": "{} đồng ý: {}".format("Cấp" if p.get("granted") else "Rút", p.get("purpose")),
     }
     return labels.get(t, t)
 
@@ -106,11 +111,14 @@ def compute_person(partner_fields: dict | None, events: list, now: datetime, cfg
     videos_completed = 0
     first_touch = last_touch = None
     last_seen = None
+    fb_ids: dict = {}
+    zalo_follower = None
 
     for ev in events:
         at = aware(ev.occurred_at)
         p = ev.payload.get("properties") or {}
         last_seen = max(last_seen, at) if last_seen else at
+        fb_ids.update((ev.payload.get("context") or {}).get("fb") or {})
         et = ev.event_type
 
         if ev.kind == "page":
@@ -128,6 +136,8 @@ def compute_person(partner_fields: dict | None, events: list, now: datetime, cfg
             course_names.setdefault(cid, p.get("course_name"))
             if at >= now - timedelta(days=14):
                 course_views[cid] = course_views.get(cid, 0) + 1
+        elif et in ("zalo.follow", "zalo.unfollow"):
+            zalo_follower = et == "zalo.follow"
         elif et == "Video Progress" and str(p.get("milestone")) == "100":
             videos_completed += 1
         elif et in ORDER_STATUS:
@@ -221,6 +231,8 @@ def compute_person(partner_fields: dict | None, events: list, now: datetime, cfg
     t["first_touch"] = first_touch
     t["last_touch"] = last_touch
     t["last_seen_at"] = iso(last_seen)
+    t["fb"] = fb_ids or None
+    t["zalo_follower"] = zalo_follower
 
     recency = (now - paid_dates[-1]).days if paid_dates else None
     t["recency_days"] = recency

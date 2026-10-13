@@ -6,7 +6,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import activation, segments as seg
+from . import activation, destinations, segments as seg
 from .db import session_scope
 from .models import Profile, Segment, SegmentMember, Tenant, utcnow
 from .pipeline import refresh_profile
@@ -64,6 +64,8 @@ def run_once(tenant_id: str | None = None, push: bool = True, client: httpx.Clie
                 refresh_tenant(session, tenant)
                 session.flush()
                 results[tenant.id] = activation.push_tenant(session, tenant, client) if push else {}
+                if push:
+                    results[tenant.id]["destinations"] = destinations.run(session, tenant, client)
     finally:
         if own_client:
             client.close()
