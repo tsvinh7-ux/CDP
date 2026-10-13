@@ -66,3 +66,19 @@ class TestEducationEvents(TransactionCase):
         self.assertEqual(paid.payload["properties"]["amount"], order.amount_total)
         tx._set_done()  # already done: no duplicate event
         self.assertEqual(len(self.events("order.paid")), 1)
+
+    def test_backfill_history_is_deterministic(self):
+        self.channel._action_add_members(self.partner)
+        self.env["cdp.outbox"].search([]).unlink()
+        Outbox = self.env["cdp.outbox"].with_context(cdp_no_commit=True, cdp_no_retrigger=True)
+        Outbox.action_backfill()
+        Outbox._cron_backfill()
+        enrolled = self.events("course.enrolled").filtered(lambda r: r.payload["subject"]["id"] == self.partner.id)
+        self.assertEqual(len(enrolled), 1)
+        self.assertTrue(self.events("entity.upserted").filtered(lambda r: r.res_id == self.partner.id))
+        first_id = enrolled.event_id
+        Outbox.action_backfill()
+        Outbox._cron_backfill()
+        again = self.events("course.enrolled").filtered(lambda r: r.payload["subject"]["id"] == self.partner.id)
+        # Same deterministic event_id: CDP Core drops the duplicate.
+        self.assertEqual(set(again.mapped("event_id")), {first_id})

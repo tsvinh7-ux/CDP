@@ -93,14 +93,15 @@ class CdpOutbox(models.Model):
         }
 
     @api.model
-    def _envelope(self, kind, event_type, record=None, partner=None, properties=None):
+    def _envelope(self, kind, event_type, record=None, partner=None, properties=None, occurred_at=None,
+                  event_id=None):
         cfg = self._cdp_config()
         msg = {
             "spec_version": SPEC_VERSION,
-            "event_id": str(uuid.uuid4()),
+            "event_id": event_id or str(uuid.uuid4()),
             "kind": kind,
             "event_type": event_type,
-            "occurred_at": fields.Datetime.now().isoformat() + "Z",
+            "occurred_at": (occurred_at or fields.Datetime.now()).isoformat() + "Z",
             "tenant_id": cfg["tenant_id"],
             "source": {
                 "type": "odoo",
@@ -119,15 +120,19 @@ class CdpOutbox(models.Model):
         return msg
 
     @api.model
-    def _emit(self, event_type, partner=None, record=None, properties=None):
-        """Queue a business event, e.g. ``_emit('order.paid', order.partner_id, order, {...})``."""
+    def _emit(self, event_type, partner=None, record=None, properties=None, occurred_at=None, event_id=None):
+        """Queue a business event, e.g. ``_emit('order.paid', order.partner_id, order, {...})``.
+
+        Backfills pass the historical `occurred_at` and a deterministic `event_id`
+        (see `_history_event_id`) so a re-run never duplicates events in CDP.
+        """
         if not self._cdp_enabled():
             return self.browse()
         if partner is not None and partner and self._is_public_partner(partner):
             return self.browse()  # anonymous website visitor: the web SDK covers them
         if partner and partner.sudo().cdp_excluded and event_type != "privacy.erasure_requested":
             return self.browse()  # erasure requested: nothing about this person leaves Odoo
-        msg = self._envelope("event", event_type, record, partner, properties)
+        msg = self._envelope("event", event_type, record, partner, properties, occurred_at, event_id)
         return self.sudo().create({
             "event_id": msg["event_id"], "kind": "event", "event_type": event_type,
             "res_model": record._name if record else None, "res_id": record.id if record else None,
@@ -181,7 +186,7 @@ class CdpOutbox(models.Model):
         cfg = cfg or self._cdp_config()
         self.env.cr.execute(
             """SELECT id FROM cdp_outbox
-                WHERE state IN ('pending', 'failed') AND next_attempt_at <= (now() at time zone 'UTC')
+                WHERE state IN ('pending', 'failed') AND next_attempt_at <= (clock_timestamp() at time zone 'UTC')
                 ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED""",
             [BATCH_SIZE],
         )
@@ -242,6 +247,65 @@ class CdpOutbox(models.Model):
     def action_send_now(self):
         self._cron_send()
         return True
+
+    # ------------------------------------------------------------------ backfill
+
+    @api.model
+    def _history_event_id(self, record, event_type):
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"odoo://{self.env.cr.dbname}/{record._name}/{record.id}/{event_type}"))
+
+    @api.model
+    def _cdp_backfill_steps(self):
+        """Ordered (kind, model) steps; vertical add-ons append their history steps."""
+        mappings = self.env["cdp.mapping"].sudo().search([("active", "=", True)])
+        # Partners first so that history events find their profile.
+        models = sorted(mappings.mapped("model_name"), key=lambda m: m != "res.partner")
+        return [("entities", m) for m in models if m in self.env]
+
+    @api.model
+    def action_backfill(self):
+        """Start a full (re)synchronisation, processed in chunks by the backfill cron."""
+        state = {"steps": [[kind, model, 0] for kind, model in self._cdp_backfill_steps()]}
+        self.env["ir.config_parameter"].sudo().set_param("cdp.backfill_state", json.dumps(state))
+        cron = self.env.ref("cdp_base.ir_cron_cdp_backfill", raise_if_not_found=False)
+        if cron:
+            cron.sudo().write({"active": True})
+            cron.sudo()._trigger()
+        return True
+
+    @api.model
+    def _cron_backfill(self, chunk=1000, max_chunks=20):
+        icp = self.env["ir.config_parameter"].sudo()
+        state = json.loads(icp.get_param("cdp.backfill_state") or "{}")
+        steps = state.get("steps") or []
+        done_chunks = 0
+        while steps and done_chunks < max_chunks:
+            kind, model, last_id = steps[0]
+            Model = self.env[model].sudo().with_context(active_test=False)
+            domain = [("id", ">", last_id)]
+            if model == "res.partner":
+                domain.append(("cdp_excluded", "=", False))
+            records = Model.search(domain, order="id", limit=chunk)
+            if not records:
+                steps.pop(0)
+                continue
+            if kind == "entities":
+                self._enqueue_entities(model, records.ids)
+            else:
+                records._cdp_history_events()
+            steps[0][2] = records[-1].id
+            done_chunks += 1
+            icp.set_param("cdp.backfill_state", json.dumps({"steps": steps}))
+            if not self.env.context.get("cdp_no_commit"):
+                self.env.cr.commit()  # long backfills progress chunk by chunk
+        icp.set_param("cdp.backfill_state", json.dumps({"steps": steps}))
+        if not steps:
+            cron = self.env.ref("cdp_base.ir_cron_cdp_backfill", raise_if_not_found=False)
+            if cron:
+                cron.sudo().write({"active": False})
+        elif not self.env.context.get("cdp_no_retrigger"):
+            self.env.ref("cdp_base.ir_cron_cdp_backfill")._trigger()
+        return steps
 
     @api.autovacuum
     def _gc_sent(self):

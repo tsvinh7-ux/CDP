@@ -43,3 +43,13 @@ class SaleOrder(models.Model):
         for order in self:
             order.env["cdp.outbox"]._emit("order.cancelled", order.partner_id, order, order._cdp_order_props())
         return res
+
+    def _cdp_history_events(self):
+        """Backfill: past paid orders (deterministic ids, historical dates)."""
+        outbox = self.env["cdp.outbox"]
+        for order in self.filtered(lambda o: o.state in ("sale", "done")):
+            txs = order.transaction_ids.filtered(lambda t: t.state == "done")
+            props = order._cdp_order_props()
+            props["provider"] = txs[:1]._cdp_provider_key() if txs else "unknown"
+            outbox._emit("order.paid", order.partner_id, order, props, occurred_at=order.date_order,
+                         event_id=outbox._history_event_id(order, "order.paid"))

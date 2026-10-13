@@ -81,3 +81,25 @@ class SlideSlidePartner(models.Model):
         res = super().write(vals)
         newly._cdp_emit_completed()
         return res
+
+
+class SlideChannelPartnerHistory(models.Model):
+    _inherit = "slide.channel.partner"
+
+    def _cdp_history_events(self):
+        """Backfill: past enrolments and completions."""
+        outbox = self.env["cdp.outbox"]
+        for member in self.filtered(lambda m: m.member_status != "invited"):
+            channel = member.channel_id
+            if member.partner_id == channel.user_id.partner_id:
+                continue
+            props = _course_props(channel)
+            outbox._emit("course.enrolled", member.partner_id, channel, props, occurred_at=member.create_date,
+                         event_id=outbox._history_event_id(member, "course.enrolled"))
+            if member.completion >= 100:
+                outbox._emit("course.completed", member.partner_id, channel, props, occurred_at=member.write_date,
+                             event_id=outbox._history_event_id(member, "course.completed"))
+            elif member.completion:
+                outbox._emit("course.progressed", member.partner_id, channel, dict(props, completion=member.completion),
+                             occurred_at=member.write_date,
+                             event_id=outbox._history_event_id(member, "course.progressed"))

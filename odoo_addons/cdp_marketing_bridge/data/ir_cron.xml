@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="ir_cron_cdp_sync_mailing_lists" model="ir.cron">
+        <field name="name">CDP: sync segments to mailing lists</field>
+        <field name="model_id" ref="cdp_base.model_cdp_segment"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_sync_mailing_lists()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">hours</field>
+        <field name="numbercall">-1</field>
+    </record>
+</odoo>

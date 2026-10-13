@@ -38,6 +38,26 @@ class ResPartner(models.Model):
     def _search_cdp_segment_ids(self, operator, value):
         return [("cdp_profile_ids.segment_ids", operator, value)]
 
+    cdp_marketing_allowed = fields.Boolean("CDP: được phép tiếp thị", compute="_compute_cdp_consent_flags",
+                                           search="_search_cdp_marketing_allowed")
+    cdp_lead_score = fields.Integer("CDP: điểm lead", compute="_compute_cdp_consent_flags",
+                                    search="_search_cdp_lead_score")
+    cdp_next_best_course = fields.Char("CDP: khóa gợi ý", compute="_compute_cdp_consent_flags")
+
+    @api.depends("cdp_profile_ids.consent_marketing", "cdp_profile_ids.lead_score", "cdp_profile_ids.next_best_course")
+    def _compute_cdp_consent_flags(self):
+        for partner in self:
+            prof = partner.cdp_profile_ids[:1]
+            partner.cdp_marketing_allowed = prof.consent_marketing
+            partner.cdp_lead_score = prof.lead_score
+            partner.cdp_next_best_course = prof.next_best_course
+
+    def _search_cdp_marketing_allowed(self, operator, value):
+        return [("cdp_profile_ids.consent_marketing", operator, value)]
+
+    def _search_cdp_lead_score(self, operator, value):
+        return [("cdp_profile_ids.lead_score", operator, value)]
+
     def _search_cdp_total_spent(self, operator, value):
         return [("cdp_profile_ids.total_spent", operator, value)]
 

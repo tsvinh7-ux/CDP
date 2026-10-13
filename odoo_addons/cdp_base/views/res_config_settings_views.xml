@@ -20,6 +20,9 @@
                                 <div class="row"><label for="cdp_write_key" class="col-lg-4"/><field name="cdp_write_key"/></div>
                             </div>
                             <button name="action_cdp_send_now" type="object" string="Gửi outbox ngay" class="btn-link" icon="fa-paper-plane"/>
+                            <button name="action_cdp_backfill" type="object" string="Đồng bộ toàn bộ (backfill dữ liệu lịch sử)"
+                                    class="btn-link" icon="fa-database"
+                                    confirm="Gửi toàn bộ khách hàng và lịch sử (đơn hàng, ghi danh…) sang CDP? Chạy nền theo từng lô, chạy lại không tạo trùng."/>
                         </setting>
                     </block>
                 </app>

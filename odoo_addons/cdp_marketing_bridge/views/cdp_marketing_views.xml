@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="cdp_segment_view_form_marketing" model="ir.ui.view">
+        <field name="name">cdp.segment.form.marketing</field>
+        <field name="model">cdp.segment</field>
+        <field name="inherit_id" ref="cdp_base.cdp_segment_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button name="action_create_mailing" type="object" class="oe_stat_button" icon="fa-envelope"
+                        string="Tạo email marketing"/>
+            </xpath>
+            <xpath expr="//field[@name='description']" position="after">
+                <group string="Email Marketing">
+                    <field name="mailing_list_id"/>
+                </group>
+                <separator string="Khi khách vào phân khúc (trigger)"/>
+                <field name="trigger_rule_ids" context="{'default_segment_id': id}">
+                    <tree editable="bottom">
+                        <field name="sequence" widget="handle"/>
+                        <field name="action"/>
+                        <field name="only_role" placeholder="clinic_owner"/>
+                        <field name="user_id" invisible="action != 'activity'"/>
+                        <field name="activity_summary" invisible="action != 'activity'"/>
+                        <field name="mailing_list_id" invisible="action != 'mailing_list'"/>
+                        <field name="ma_campaign_id" invisible="action != 'ma_campaign'"/>
+                        <field name="ma_participant_model" optional="hide"/>
+                        <field name="active" widget="boolean_toggle"/>
+                    </tree>
+                </field>
+            </xpath>
+        </field>
+    </record>
+</odoo>

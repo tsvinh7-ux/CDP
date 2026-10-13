@@ -10,4 +10,14 @@
         <field name="numbercall">-1</field>
         <field name="active" eval="True"/>
     </record>
+    <record id="ir_cron_cdp_backfill" model="ir.cron">
+        <field name="name">CDP: backfill (full synchronisation)</field>
+        <field name="model_id" ref="model_cdp_outbox"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_backfill()</field>
+        <field name="interval_number">5</field>
+        <field name="interval_type">minutes</field>
+        <field name="numbercall">-1</field>
+        <field name="active" eval="False"/>
+    </record>
 </odoo>

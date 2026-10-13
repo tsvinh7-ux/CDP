@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_cdp_trigger_rule_user,cdp.trigger.rule user,model_cdp_trigger_rule,cdp_base.group_cdp_user,1,0,0,0
+access_cdp_trigger_rule_manager,cdp.trigger.rule manager,model_cdp_trigger_rule,cdp_base.group_cdp_manager,1,1,1,1

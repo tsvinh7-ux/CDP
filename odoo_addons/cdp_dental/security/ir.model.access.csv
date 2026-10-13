@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_cdp_event_rule_manager,cdp.event.rule manager,model_cdp_event_rule,cdp_base.group_cdp_manager,1,1,1,1
+access_cdp_event_rule_line_manager,cdp.event.rule.line manager,model_cdp_event_rule_line,cdp_base.group_cdp_manager,1,1,1,1
+access_cdp_event_rule_user,cdp.event.rule user,model_cdp_event_rule,base.group_user,1,0,0,0
+access_cdp_event_rule_line_user,cdp.event.rule.line user,model_cdp_event_rule_line,base.group_user,1,0,0,0

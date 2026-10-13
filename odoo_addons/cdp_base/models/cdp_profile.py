@@ -80,6 +80,10 @@ class CdpProfile(models.Model):
     engagement_score = fields.Integer(readonly=True)
     last_seen_at = fields.Datetime(readonly=True)
     core_updated_at = fields.Datetime(readonly=True)
+    consent_marketing = fields.Boolean("Cho phép tiếp thị", readonly=True)
+    consent_ads = fields.Boolean("Cho phép quảng cáo", readonly=True)
+    lead_score = fields.Integer(readonly=True)
+    next_best_course = fields.Char("Khóa gợi ý", readonly=True)
     timeline_html = fields.Html(compute="_compute_html", sanitize=False)
     summary_html = fields.Html(compute="_compute_html", sanitize=False)
 
@@ -110,6 +114,12 @@ class CdpProfile(models.Model):
             add(_("Phòng khám"), "{} – {} nhân sự, {} người đã học; đã học: {}".format(
                 clinic.get("name") or "", clinic.get("staff_count"), clinic.get("learners_count"),
                 ", ".join(clinic.get("staff_course_tags") or []) or "–"))
+        add(_("Điểm lead"), "{} – {}".format(t.get("lead_score"), "; ".join(t.get("lead_score_reasons") or []))
+            if t.get("lead_score") else None)
+        if t.get("next_best_course"):
+            add(_("Gợi ý khóa tiếp theo"), "{} ({})".format(t["next_best_course"].get("name"), t["next_best_course"].get("reason")))
+        if t.get("clinic_next_course"):
+            add(_("Gợi ý cho phòng khám"), t["clinic_next_course"].get("name"))
         add(_("Khóa đã ghi danh"), ", ".join(c.get("name") or str(c.get("id")) for c in t.get("courses_enrolled") or []))
         add(_("Đang quan tâm"), ", ".join(f"{c.get('name')} ({c.get('views')} lượt xem)" for c in t.get("hot_courses") or []))
         cart = t.get("open_cart")
@@ -158,6 +168,11 @@ class CdpProfile(models.Model):
                 "engagement_score": t.get("engagement_score") or 0,
                 "last_seen_at": _to_dt(t.get("last_seen_at")),
                 "core_updated_at": _to_dt(doc.get("updated_at")),
+                "consent_marketing": bool((t.get("consent") or {}).get("marketing")),
+                "consent_ads": bool((t.get("consent") or {}).get("ads")),
+                "lead_score": t.get("lead_score") or 0,
+                "next_best_course": ((t.get("clinic_next_course") if t.get("job_role") == "clinic_owner" else None)
+                                     or t.get("next_best_course") or {}).get("name"),
             }
             if pid in profiles:
                 profiles[pid].write(vals)

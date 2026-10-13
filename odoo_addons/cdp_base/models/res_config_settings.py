@@ -15,3 +15,6 @@ class ResConfigSettings(models.TransientModel):
 
     def action_cdp_send_now(self):
         self.env["cdp.outbox"].action_send_now()
+
+    def action_cdp_backfill(self):
+        self.env["cdp.outbox"].action_backfill()
