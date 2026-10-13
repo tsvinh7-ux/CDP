@@ -1,0 +1,10 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_cdp_profile_internal,cdp.profile internal,model_cdp_profile,base.group_user,1,0,0,0
+access_cdp_segment_internal,cdp.segment internal,model_cdp_segment,base.group_user,1,0,0,0
+access_cdp_profile_manager,cdp.profile manager,model_cdp_profile,group_cdp_manager,1,1,1,1
+access_cdp_segment_manager,cdp.segment manager,model_cdp_segment,group_cdp_manager,1,1,1,1
+access_cdp_trigger_user,cdp.trigger.log user,model_cdp_trigger_log,group_cdp_user,1,0,0,0
+access_cdp_trigger_manager,cdp.trigger.log manager,model_cdp_trigger_log,group_cdp_manager,1,1,1,1
+access_cdp_outbox_manager,cdp.outbox manager,model_cdp_outbox,group_cdp_manager,1,1,0,1
+access_cdp_mapping_user,cdp.mapping user,model_cdp_mapping,group_cdp_user,1,0,0,0
+access_cdp_mapping_manager,cdp.mapping manager,model_cdp_mapping,group_cdp_manager,1,1,1,1

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CDP Console</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2433; --muted:#667085; --line:#e4e7ec; --accent:#2f6fed; --ok:#12805c; --warn:#b54708; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:16px; align-items:center; padding:14px 24px; background:var(--card); border-bottom:1px solid var(--line); }
+  header h1 { font-size:17px; margin:0; }
+  header .muted { margin-left:auto; }
+  main { padding:20px 24px; display:grid; gap:20px; grid-template-columns: 1fr 1fr; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { font-size:14px; margin:0 0 12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .kpis { display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; }
+  .kpi { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi b { display:block; font-size:22px; }
+  .kpi span { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; color:var(--muted); font-weight:600; }
+  tr.click { cursor:pointer; } tr.click:hover { background:#f0f4ff; }
+  .tag { display:inline-block; padding:1px 7px; margin:1px 2px 1px 0; border-radius:10px; background:#eef2ff; color:#3538cd; font-size:12px; }
+  .tag.trigger { background:#fff4ed; color:var(--warn); }
+  .src { font-size:11px; padding:1px 6px; border-radius:4px; background:#ecfdf3; color:var(--ok); }
+  .src.web { background:#eff8ff; color:#175cd3; }
+  .muted { color:var(--muted); }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow:auto; max-height:420px; font-size:12px; }
+  .scroll { max-height:420px; overflow:auto; }
+  button { border:1px solid var(--line); background:var(--card); padding:6px 12px; border-radius:6px; cursor:pointer; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding:16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>DMAG CDP Console</h1>
+  <span id="tenant" class="tag"></span>
+  <button id="run">Chạy jobs &amp; đồng bộ Odoo</button>
+  <span class="muted" id="updated"></span>
+</header>
+<main>
+  <section class="wide"><h2>Tổng quan</h2><div class="kpis" id="kpis"></div></section>
+  <section class="wide"><h2>Phân khúc</h2><table id="segments"></table></section>
+  <section class="wide"><h2>Hồ sơ khách hàng</h2><div class="scroll"><table id="profiles"></table></div></section>
+  <section><h2>Sự kiện mới nhất</h2><div class="scroll"><table id="events"></table></div></section>
+  <section><h2>Chi tiết hồ sơ</h2><div id="detail" class="muted">Chọn một hồ sơ ở bảng trên.</div></section>
+</main>
+<script>
+const qs = new URLSearchParams(location.search);
+const token = qs.get('token') || '';
+let tenant = qs.get('tenant');
+const api = (p, opt={}) => fetch(p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token), opt).then(r => r.json());
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money = v => v ? Number(v).toLocaleString('vi-VN') + 'đ' : '–';
+const time = v => v ? new Date(v).toLocaleString('vi-VN') : '–';
+let segNames = {}, triggerKeys = new Set();
+
+async function load() {
+  if (!tenant) { const ts = await api('/v1/admin/tenants'); tenant = ts[0] && ts[0].id; }
+  document.getElementById('tenant').textContent = 'tenant: ' + tenant;
+  const [stats, segs, profs, evs] = await Promise.all([
+    api('/v1/admin/stats?tenant=' + tenant), api('/v1/admin/segments?tenant=' + tenant),
+    api('/v1/admin/profiles?tenant=' + tenant), api('/v1/admin/events?limit=60&tenant=' + tenant)]);
+  const labels = {events:'Sự kiện', events_web:'Từ website', events_odoo:'Từ Odoo', profiles:'Hồ sơ',
+    known_profiles:'Đã định danh', anonymous_profiles:'Ẩn danh', accounts:'Phòng khám', merged_profiles:'Đã gộp', merge_suggestions:'Đề xuất gộp'};
+  document.getElementById('kpis').innerHTML = Object.entries(labels).map(([k, l]) => `<div class="kpi"><b>${stats[k] ?? 0}</b><span>${l}</span></div>`).join('');
+  segNames = Object.fromEntries(segs.map(s => [s.key, s.name]));
+  triggerKeys = new Set(segs.filter(s => s.trigger_on_enter).map(s => s.key));
+  document.getElementById('segments').innerHTML = '<tr><th>Khóa</th><th>Tên</th><th>Thành viên</th><th>Trigger</th></tr>' +
+    segs.map(s => `<tr><td><code>${esc(s.key)}</code></td><td>${esc(s.name)}</td><td>${s.member_count}</td><td>${s.trigger_on_enter ? '⚡ khi vào' : ''}</td></tr>`).join('');
+  document.getElementById('profiles').innerHTML = '<tr><th>Tên / ID</th><th>Loại</th><th>Vai trò</th><th>Phòng khám</th><th>RFM</th><th>Chi tiêu</th><th>Engage</th><th>Phân khúc</th></tr>' +
+    profs.map(p => `<tr class="click" data-id="${p.id}"><td>${esc(p.name || (p.partner_id ? 'partner ' + p.partner_id : 'Khách ẩn danh'))}<br><span class="muted">${p.partner_id ? 'Odoo #' + p.partner_id : esc(p.id.slice(0, 14))}</span></td>
+      <td>${p.kind === 'account' ? 'Phòng khám' : 'Người'}</td><td>${esc(p.job_role || '')}</td><td>${esc(p.clinic || '')}</td>
+      <td>${esc(p.rfm_segment || '')}</td><td>${money(p.total_spent)}</td><td>${p.engagement_score ?? ''}</td>
+      <td>${(p.segments || []).map(k => `<span class="tag ${triggerKeys.has(k) ? 'trigger' : ''}" title="${esc(segNames[k])}">${esc(k)}</span>`).join('')}</td></tr>`).join('');
+  document.querySelectorAll('#profiles tr.click').forEach(tr => tr.onclick = () => show(tr.dataset.id));
+  document.getElementById('events').innerHTML = '<tr><th>Thời điểm</th><th>Nguồn</th><th>Sự kiện</th></tr>' +
+    evs.map(e => `<tr><td>${time(e.occurred_at)}</td><td><span class="src ${e.source}">${e.source}</span></td><td>${esc(e.type)}<br><span class="muted">${esc(JSON.stringify(e.properties || {}).slice(0, 90))}</span></td></tr>`).join('');
+  document.getElementById('updated').textContent = 'Cập nhật ' + new Date().toLocaleTimeString('vi-VN');
+}
+
+async function show(id) {
+  const p = await api('/v1/admin/profiles/' + id);
+  const t = p.traits || {};
+  const tl = (t.timeline || []).map(x => `<tr><td>${time(x.at)}</td><td>${esc(x.label)}</td></tr>`).join('');
+  document.getElementById('detail').innerHTML = `<b>${esc(p.name || p.id)}</b> <span class="muted">${esc(p.id)}</span>
+    <p>${(p.segments || []).map(k => `<span class="tag">${esc(segNames[k] || k)}</span>`).join(' ') || '<span class="muted">Chưa thuộc phân khúc nào</span>'}</p>
+    ${tl ? `<table><tr><th>Thời điểm</th><th>Hoạt động</th></tr>${tl}</table>` : ''}
+    <h2 style="margin-top:14px">Traits</h2><pre>${esc(JSON.stringify(t, null, 2))}</pre>`;
+}
+
+document.getElementById('run').onclick = async () => { await api('/v1/admin/run-jobs' + (tenant ? '?tenant=' + tenant : ''), {method: 'POST'}); load(); };
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>

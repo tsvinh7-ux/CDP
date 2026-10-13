@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_partner_form_cdp" model="ir.ui.view">
+        <field name="name">res.partner.form.cdp</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="CDP 360" name="cdp_360" invisible="not cdp_profile_id">
+                    <field name="cdp_profile_id" invisible="1"/>
+                    <group>
+                        <group>
+                            <field name="cdp_segment_ids" widget="many2many_tags" string="Phân khúc"/>
+                            <field name="cdp_rfm_segment"/>
+                        </group>
+                        <group>
+                            <field name="cdp_total_spent" string="Tổng chi tiêu"/>
+                            <field name="cdp_engagement_score"/>
+                            <field name="cdp_last_seen_at"/>
+                        </group>
+                    </group>
+                    <field name="cdp_summary_html" nolabel="1"/>
+                    <separator string="Hoạt động gần đây (web, học tập, đơn hàng)"/>
+                    <field name="cdp_timeline_html" nolabel="1"/>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_res_partner_filter_cdp" model="ir.ui.view">
+        <field name="name">res.partner.search.cdp</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_res_partner_filter"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='category_id']" position="after">
+                <field name="cdp_segment_ids" string="Phân khúc CDP"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

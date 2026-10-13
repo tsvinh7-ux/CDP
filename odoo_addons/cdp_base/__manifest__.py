@@ -1,0 +1,22 @@
+{
+    "name": "CDP Connector (Base)",
+    "summary": "Kết nối Odoo với DMAG CDP Core: outbox sự kiện, nhận hồ sơ/phân khúc/trigger, tab CDP 360",
+    "version": "17.0.0.1.0",
+    "category": "Marketing",
+    "author": "DMAG",
+    "license": "OPL-1",
+    "depends": ["base", "mail"],
+    "data": [
+        "security/cdp_security.xml",
+        "security/ir.model.access.csv",
+        "data/ir_cron.xml",
+        "data/cdp_mapping.xml",
+        "views/cdp_profile_views.xml",
+        "views/cdp_outbox_views.xml",
+        "views/res_partner_views.xml",
+        "views/res_config_settings_views.xml",
+        "views/cdp_menus.xml",
+    ],
+    "application": True,
+    "installable": True,
+}

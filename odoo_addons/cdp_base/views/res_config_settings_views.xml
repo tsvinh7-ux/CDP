@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_cdp" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.cdp</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="CDP" string="CDP" name="cdp_base" groups="cdp_base.group_cdp_manager">
+                    <block title="Kết nối CDP Core" name="cdp_connection">
+                        <setting string="Bật đồng bộ" help="Ghi sự kiện vào outbox và gửi sang CDP Core mỗi phút">
+                            <field name="cdp_enabled"/>
+                        </setting>
+                        <setting string="Kết nối">
+                            <div class="content-group">
+                                <div class="row"><label for="cdp_core_url" class="col-lg-4"/><field name="cdp_core_url"/></div>
+                                <div class="row"><label for="cdp_public_url" class="col-lg-4"/><field name="cdp_public_url"/></div>
+                                <div class="row"><label for="cdp_tenant_id" class="col-lg-4"/><field name="cdp_tenant_id"/></div>
+                                <div class="row"><label for="cdp_secret" class="col-lg-4"/><field name="cdp_secret" password="True"/></div>
+                                <div class="row"><label for="cdp_write_key" class="col-lg-4"/><field name="cdp_write_key"/></div>
+                            </div>
+                            <button name="action_cdp_send_now" type="object" string="Gửi outbox ngay" class="btn-link" icon="fa-paper-plane"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+    <record id="action_cdp_settings" model="ir.actions.act_window">
+        <field name="name">Cài đặt</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">inline</field>
+        <field name="context">{'module': 'cdp_base', 'bin_size': False}</field>
+    </record>
+</odoo>

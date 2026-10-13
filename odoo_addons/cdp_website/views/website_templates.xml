@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="layout_cdp_tracking" inherit_id="website.layout" name="CDP tracking">
+        <xpath expr="//head" position="inside">
+            <t t-if="website and not editable">
+                <t t-out="website._cdp_tracking_snippet(main_object)"/>
+            </t>
+        </xpath>
+    </template>
+</odoo>

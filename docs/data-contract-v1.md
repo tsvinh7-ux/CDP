@@ -131,12 +131,12 @@ X-CDP-Signature: sha256=<hex(HMAC_SHA256(secret, timestamp + "." + body))>
 
 ### 4.2. Core → Odoo
 
-Endpoint do `cdp_base` cung cấp. Xác thực bằng **Odoo API key** của user kỹ thuật `cdp_bot` (chỉ có quyền trên model `cdp.*`) và HMAC như trên.
+Endpoint do `cdp_base` cung cấp, xác thực bằng HMAC như trên (đã cài trong MVP). Khi lên production, bổ sung **Odoo API key** của user kỹ thuật `cdp_bot`, chỉ có quyền trên model `cdp.*`.
 
 | Endpoint | Mục đích |
 |---------|---------|
-| `POST /cdp/v1/profiles` | Upsert `cdp.profile` theo lô (chỉ phần thay đổi) |
-| `POST /cdp/v1/segments/<key>/members` | Thêm/bớt thành viên phân khúc |
+| `POST /cdp/v1/profiles` | Upsert `cdp.profile` theo lô (chỉ hồ sơ thay đổi). Mỗi hồ sơ kèm **danh sách đầy đủ** `segments`: đây là nguồn chuẩn cho thành viên phân khúc, idempotent và tự sửa nếu lỡ mất một lần đẩy |
+| `POST /cdp/v1/segments/<key>/members` | Thêm/bớt thành viên theo delta (dùng cho thao tác hàng loạt thủ công) |
 | `PUT /cdp/v1/segments/<key>` | Tạo/cập nhật định nghĩa hiển thị của phân khúc (tên, mô tả, số lượng) |
 | `POST /cdp/v1/triggers` | Trigger real-time cho Marketing Automation/CRM |
 | `GET /cdp/v1/health` | Kiểm tra kết nối, version module, độ trễ outbox |
@@ -146,9 +146,11 @@ Ví dụ:
 ```json
 // POST /cdp/v1/profiles
 { "profiles": [
-  { "partner_id": 123, "cdp_id": "prf_01J9...", "updated_at": "2026-10-13T02:00:00Z",
-    "traits": { "rfm_segment": "champions", "ltv": 18500000, "engagement_score": 72,
-                "lead_score": 0.81, "next_best_course": "slide.channel:42" } }
+  { "partner_id": 123, "cdp_id": "prf_01J9...", "kind": "person", "updated_at": "2026-10-13T02:00:00Z",
+    "segments": ["clinic_owners", "owner_staff_basic_no_advanced"],
+    "traits": { "rfm_segment": "champion", "total_spent": 18500000, "engagement_score": 72,
+                "clinic": { "name": "Nha khoa An Phúc", "learners_count": 2, "staff_course_tags": ["Cơ bản"] },
+                "timeline": [ { "at": "...", "label": "Xem khóa Implant Nâng cao" } ] } }
 ]}
 
 // POST /cdp/v1/segments/checkout_abandoned_24h/members
@@ -182,8 +184,10 @@ Ví dụ:
 | `account.signed_up` | Tạo `res.users` portal | `signup_method`, `utm_*` |
 | `consent.updated` | Form consent / thay đổi opt-out | `purpose` (`care`, `marketing`, `ads`, `analytics`), `granted`, `channel`, `evidence_ref` |
 | `order.created` | `sale.order` tạo | `order_id`, `amount`, `currency`, `lines[]` (`product_id`, `qty`, `price`), `website_id`, `utm_*` |
-| `cart.updated` | `sale.order` nháp có `website_id` thay đổi dòng | `order_id`, `amount`, `lines[]` |
-| `order.paid` | `payment.transaction` → `done` hoặc hóa đơn đã thanh toán | `order_id`, `amount`, `provider`, `invoice_id` |
+| `cart.updated` | `sale.order._cart_update` (website) | `order_id`, `order_name`, `amount`, `items[]` |
+| `order.placed` | `payment.transaction` được tạo (khách chọn VNPay hoặc SePay, tiền chưa về) | `order_id`, `amount`, `provider` (`vnpay`, `sepay`), `transaction` |
+| `order.confirmed` | `sale.order.action_confirm` | `order_id`, `amount` (không ghi đè trạng thái đã thanh toán) |
+| `order.paid` | `payment.transaction` → `done` (VNPay IPN / webhook SePay) | `order_id`, `amount`, `provider` (`vnpay`, `sepay`), `transaction` |
 | `order.cancelled` / `refund.issued` | | `order_id`, `amount`, `reason_code` |
 | `lead.created` / `lead.stage_changed` | `crm.lead` | `lead_id`, `stage`, `source`, `medium`, `campaign`, `user_id` |
 | `marketing.message_sent` / `opened` / `clicked` / `bounced` / `unsubscribed` | Marketing Automation / mailing | `campaign_id`, `activity_id`, `channel` |
@@ -193,7 +197,7 @@ Ví dụ:
 
 | `event_type` | Nguồn Odoo | `properties` chính |
 |-------------|-----------|-------------------|
-| `course.enrolled` | `slide.channel.partner` tạo | `course_id`, `course_name`, `enroll_type` (`paid`, `free`, `invited`) |
+| `course.enrolled` | `slide.channel.partner` tạo (bỏ qua giảng viên phụ trách) | `course_id`, `course_name`, `course_tags` (ví dụ `Cơ bản`, `Nâng cao`), `enroll_type` (`paid`, `free`, `invited`) |
 | `lesson.completed` | `slide.slide.partner.completed` = True | `course_id`, `lesson_id`, `lesson_type` |
 | `course.progressed` | `slide.channel.partner.completion` đổi qua mốc 25/50/75% | `course_id`, `completion` |
 | `course.completed` | `completion` = 100 | `course_id`, `duration_days` |
@@ -220,7 +224,9 @@ Theo cấu trúc Segment spec: `page`, `track`, `identify`.
 | `page` | `url`, `path`, `title`, `referrer`, `utm_*`, `fbclid`, `zclid` |
 | `Course Viewed` | `course_id`, `course_name`, `price` |
 | `Lesson Viewed` | `course_id`, `lesson_id` |
-| `Video Progress` | `lesson_id`, `milestone` (25/50/75/100) |
+| `Video Opened` | `lesson_id`, `provider` (`youtube`, `html5`, `gdrive`) |
+| `Video Progress` | `lesson_id`, `milestone` (25/50/75/100), `provider`. Chỉ có với YouTube và video HTML5 (NAS link trực tiếp); Google Drive không có API player |
+| `Lesson Time Spent` | `lesson_id`, `seconds` (gửi khi rời trang; dùng thay tiến độ cho video Google Drive) |
 | `Products Searched` | `query` |
 | `Product Added` | `product_id`, `course_id`, `price` |
 | `Checkout Started` | `order_id`, `amount` |

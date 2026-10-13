@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="cdp_outbox_view_tree" model="ir.ui.view">
+        <field name="name">cdp.outbox.tree</field>
+        <field name="model">cdp.outbox</field>
+        <field name="arch" type="xml">
+            <tree create="false" decoration-muted="state == 'sent'" decoration-warning="state == 'failed'"
+                  decoration-danger="state == 'dead'">
+                <field name="id" string="Seq"/>
+                <field name="create_date"/>
+                <field name="kind"/>
+                <field name="event_type"/>
+                <field name="res_model"/>
+                <field name="res_id"/>
+                <field name="state"/>
+                <field name="attempts"/>
+                <field name="sent_at"/>
+                <field name="last_error"/>
+                <button name="action_retry" type="object" icon="fa-repeat" title="Retry"
+                        invisible="state not in ('failed', 'dead')"/>
+            </tree>
+        </field>
+    </record>
+    <record id="cdp_outbox_view_form" model="ir.ui.view">
+        <field name="name">cdp.outbox.form</field>
+        <field name="model">cdp.outbox</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false">
+                <header>
+                    <button name="action_retry" type="object" string="Gửi lại" invisible="state not in ('failed', 'dead')"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="event_id"/>
+                            <field name="kind"/>
+                            <field name="event_type"/>
+                            <field name="res_model"/>
+                            <field name="res_id"/>
+                        </group>
+                        <group>
+                            <field name="attempts"/>
+                            <field name="next_attempt_at"/>
+                            <field name="sent_at"/>
+                            <field name="last_error"/>
+                        </group>
+                    </group>
+                    <field name="payload" widget="text"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="cdp_outbox_view_search" model="ir.ui.view">
+        <field name="name">cdp.outbox.search</field>
+        <field name="model">cdp.outbox</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="event_type"/>
+                <field name="res_model"/>
+                <filter name="todo" string="Chưa gửi" domain="[('state', 'in', ('pending', 'failed'))]"/>
+                <filter name="dead" string="Lỗi" domain="[('state', '=', 'dead')]"/>
+            </search>
+        </field>
+    </record>
+    <record id="action_cdp_outbox" model="ir.actions.act_window">
+        <field name="name">Outbox</field>
+        <field name="res_model">cdp.outbox</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+    <record id="action_cdp_send_now" model="ir.actions.server">
+        <field name="name">Gửi outbox ngay</field>
+        <field name="model_id" ref="model_cdp_outbox"/>
+        <field name="binding_model_id" ref="model_cdp_outbox"/>
+        <field name="state">code</field>
+        <field name="code">model.action_send_now()</field>
+    </record>
+
+    <record id="cdp_mapping_view_tree" model="ir.ui.view">
+        <field name="name">cdp.mapping.tree</field>
+        <field name="model">cdp.mapping</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="model_id"/>
+                <field name="field_ids" widget="many2many_tags"/>
+                <field name="active" widget="boolean_toggle"/>
+            </tree>
+        </field>
+    </record>
+    <record id="cdp_mapping_view_form" model="ir.ui.view">
+        <field name="name">cdp.mapping.form</field>
+        <field name="model">cdp.mapping</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="model_id"/>
+                        <field name="active"/>
+                    </group>
+                    <field name="field_ids" widget="many2many_tags"/>
+                    <div class="text-muted">Chỉ đồng bộ field cần cho marketing/CSKH. Không thêm ghi chú tự do hay dữ liệu lâm sàng.</div>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_cdp_mapping" model="ir.actions.act_window">
+        <field name="name">Mapping</field>
+        <field name="res_model">cdp.mapping</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+</odoo>

@@ -1,6 +1,6 @@
 # Đề xuất kiến trúc CDP: add-on cho Dental ERP (Odoo 17) và DMAG
 
-> Phiên bản: 0.5 · Ngày: 13/10/2026
+> Phiên bản: 0.6 · Ngày: 13/10/2026
 >
 > Lịch sử thay đổi:
 > - **0.1**: module Odoo hay platform riêng.
@@ -17,6 +17,9 @@
 >   - Thêm nhật ký quyết định (mục 0).
 >   - Thêm mô hình triển khai SaaS / Dedicated (mục 3.8).
 >   - Thêm checklist điều khoản hợp đồng với Bizapp (xem [`dieu-khoan-hop-dong-bizapp.md`](dieu-khoan-hop-dong-bizapp.md)).
+> - **0.6**:
+>   - Video: Google Drive, YouTube, NAS. Thanh toán: VNPay, SePay. Marketing Automation nhắm **chủ phòng khám**.
+>   - Đã dựng **bản khung chạy được** (CDP Core + `cdp_base`/`cdp_website`/`cdp_education` trên Odoo 17), xem [`huong-dan-chay-demo.md`](huong-dan-chay-demo.md).
 
 ## 0. Nhật ký quyết định
 
@@ -29,6 +32,8 @@
 | D5 | Dental ERP + CDP **mặc định SaaS do DMAG host**; có gói **Dedicated** (cài server riêng của khách) với giá riêng, cao hơn | 13/10/2026 |
 | D6 | Website bán khóa học của DMAG là eLearning trên Odoo; tracking SDK gửi thẳng tới Core | 13/10/2026 |
 | D7 | Đồng bộ Odoo → Core bằng outbox (không dùng CDC làm cơ chế chính); dữ liệu CDP trong Odoo lưu ở model `cdp.profile` riêng | 13/10/2026 |
+| D8 | Marketing Automation nhắm **chủ phòng khám**. CDP tổng hợp tín hiệu của nhân sự lên cấp phòng khám rồi gắn vào hồ sơ chủ phòng khám (ví dụ "nhân sự đã học Cơ bản, chưa học Nâng cao") | 13/10/2026 |
+| D9 | Video NAS nên phát bằng link file trực tiếp (thẻ `<video>`) để đo được tiến độ xem; Google Drive chỉ đo được mở video và thời gian học | 13/10/2026 |
 
 ## 1. Quyết định kiến trúc (đã chốt)
 
@@ -163,14 +168,20 @@ MA do Bizapp tự viết mô phỏng bản Enterprise. Bản Enterprise chọn �
 
 ### 3.6. Tracking trên website/eLearning Odoo của DMAG
 
-- `cdp_base` chèn JS SDK vào `web.assets_frontend`. SDK **gửi thẳng tới Core** (domain riêng, ví dụ `t.dmag.vn`), **không** gửi qua Odoo, nên Odoo không chịu tải.
+- Module `cdp_website` chèn JS SDK vào layout website. SDK **gửi thẳng tới Core** (domain riêng, ví dụ `t.dmag.vn`), **không** gửi qua Odoo, nên Odoo không chịu tải.
 - Người dùng đã đăng nhập portal: template chèn `partner_id` đã ký (HMAC, có hạn) để SDK gọi `identify`. Lịch sử duyệt web khi còn vô danh được gắn vào hồ sơ.
 - Sự kiện phía client:
   - xem trang, xem khóa, xem bài học;
-  - phát/tạm dừng/tiến độ video (theo mốc 25/50/75/100% thay vì heartbeat dày, giảm khoảng 10 lần lượng sự kiện);
+  - video theo nguồn DMAG đang dùng:
+    - **YouTube**: tiến độ theo mốc 25/50/75/100% qua YouTube iframe API;
+    - **NAS**: nếu phát bằng thẻ `<video>` với link file trực tiếp (mp4/HLS) thì đo tiến độ đầy đủ. Nếu nhúng trình phát web của NAS (iframe) thì không đo được. **Khuyến nghị phát video NAS bằng link file trực tiếp**;
+    - **Google Drive**: iframe preview không có API, chỉ ghi nhận "mở video" và thời gian ở lại bài học. Hoàn thành bài vẫn lấy chính xác từ Odoo (`slide.slide.partner`);
   - tìm kiếm, thêm vào giỏ, bắt đầu checkout.
 - Sự kiện phía server (qua outbox, chính xác hơn client):
-  - giỏ hàng (`sale.order` nháp có `website_id`) và thanh toán (`payment.transaction`);
+  - giỏ hàng (`sale.order._cart_update`) và thanh toán qua **VNPay** và **SePay** (`payment.transaction`):
+    - `order.placed`: khách đã chọn VNPay hoặc SePay nhưng tiền chưa về;
+    - `order.paid`: VNPay IPN hoặc webhook SePay xác nhận đã nhận tiền;
+    - phân khúc "đặt đơn, chưa thanh toán" dùng để nhắc khách bỏ dở VNPay hoặc chưa chuyển khoản SePay;
   - ghi danh (`slide.channel.partner`), hoàn thành bài (`slide.slide.partner`);
   - chứng chỉ (`survey.user_input` đạt);
   - đăng ký tài khoản (`res.users` portal).
@@ -302,9 +313,9 @@ MVP: use-case 1–3.
 
 Câu hỏi kỹ thuật cho Bizapp (trả lời trong workshop):
 1. Có dùng `queue_job` (OCA) không? Có sửa trực tiếp mã lõi Odoo không? Danh sách module bên thứ ba kèm giấy phép.
-2. MA của Bizapp: chọn đối tượng bằng domain filter? Hỗ trợ kênh nào (email/SMS/ZNS)? Có cơ chế trigger theo sự kiện không?
-3. Video trên eLearning host ở đâu (YouTube, Vimeo, Google Drive, server riêng)? Điều này ảnh hưởng cách theo dõi tiến độ xem.
-4. Cổng thanh toán đang dùng (VNPay, MoMo, chuyển khoản…)?
+2. MA của Bizapp: đối tượng là **chủ phòng khám** (đã xác nhận). Cần biết: lọc bằng domain filter hay model riêng? Hỗ trợ kênh nào (email/SMS/ZNS)? Có trigger theo sự kiện không?
+3. Mã kỹ thuật (`code`) của module thanh toán VNPay và SePay của Bizapp. SePay xác nhận qua webhook vào `payment.transaction` hay ghi thẳng vào sổ ngân hàng?
+4. Video NAS: phát bằng link file trực tiếp hay trình phát web của NAS?
 5. Số liệu thật: traffic/tháng, số đơn/tháng, số học viên đang học.
 
 ## 10. Bước tiếp theo

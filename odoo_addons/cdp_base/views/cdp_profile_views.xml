@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Segments -->
+    <record id="cdp_segment_view_tree" model="ir.ui.view">
+        <field name="name">cdp.segment.tree</field>
+        <field name="model">cdp.segment</field>
+        <field name="arch" type="xml">
+            <tree create="false">
+                <field name="name"/>
+                <field name="key"/>
+                <field name="member_count"/>
+                <field name="partner_count" string="Partners in Odoo"/>
+                <field name="trigger_on_enter" widget="boolean_toggle" readonly="1"/>
+            </tree>
+        </field>
+    </record>
+    <record id="cdp_segment_view_form" model="ir.ui.view">
+        <field name="name">cdp.segment.form</field>
+        <field name="model">cdp.segment</field>
+        <field name="arch" type="xml">
+            <form create="false">
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_partners" type="object" class="oe_stat_button" icon="fa-users">
+                            <field name="partner_count" widget="statinfo" string="Partners"/>
+                        </button>
+                    </div>
+                    <h1><field name="name"/></h1>
+                    <group>
+                        <field name="key"/>
+                        <field name="member_count"/>
+                        <field name="trigger_on_enter"/>
+                        <field name="active"/>
+                    </group>
+                    <field name="description"/>
+                    <div class="text-muted mt-3">
+                        Dùng trong Marketing Automation / CRM với domain:
+                        <code>[('cdp_segment_ids.key', '=', '<field name="key" class="d-inline" nolabel="1"/>')]</code>
+                    </div>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_cdp_segment" model="ir.actions.act_window">
+        <field name="name">Phân khúc CDP</field>
+        <field name="res_model">cdp.segment</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <!-- Profiles -->
+    <record id="cdp_profile_view_tree" model="ir.ui.view">
+        <field name="name">cdp.profile.tree</field>
+        <field name="model">cdp.profile</field>
+        <field name="arch" type="xml">
+            <tree create="false">
+                <field name="partner_id"/>
+                <field name="kind"/>
+                <field name="rfm_segment"/>
+                <field name="total_spent"/>
+                <field name="engagement_score"/>
+                <field name="segment_ids" widget="many2many_tags"/>
+                <field name="last_seen_at"/>
+                <field name="core_updated_at"/>
+            </tree>
+        </field>
+    </record>
+    <record id="cdp_profile_view_form" model="ir.ui.view">
+        <field name="name">cdp.profile.form</field>
+        <field name="model">cdp.profile</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false">
+                <sheet>
+                    <h1><field name="partner_id"/></h1>
+                    <group>
+                        <group>
+                            <field name="cdp_id"/>
+                            <field name="kind"/>
+                            <field name="rfm_segment"/>
+                            <field name="segment_ids" widget="many2many_tags"/>
+                        </group>
+                        <group>
+                            <field name="total_spent"/>
+                            <field name="orders_count"/>
+                            <field name="engagement_score"/>
+                            <field name="last_seen_at"/>
+                        </group>
+                    </group>
+                    <field name="summary_html"/>
+                    <notebook>
+                        <page string="Hoạt động"><field name="timeline_html"/></page>
+                        <page string="Traits (JSON)"><field name="traits" widget="text"/></page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="cdp_profile_view_search" model="ir.ui.view">
+        <field name="name">cdp.profile.search</field>
+        <field name="model">cdp.profile</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="partner_id"/>
+                <field name="segment_ids"/>
+                <filter name="persons" string="Người" domain="[('kind', '=', 'person')]"/>
+                <filter name="accounts" string="Phòng khám" domain="[('kind', '=', 'account')]"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_rfm" string="RFM" context="{'group_by': 'rfm_segment'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    <record id="action_cdp_profile" model="ir.actions.act_window">
+        <field name="name">Hồ sơ CDP</field>
+        <field name="res_model">cdp.profile</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <!-- Triggers -->
+    <record id="cdp_trigger_log_view_tree" model="ir.ui.view">
+        <field name="name">cdp.trigger.log.tree</field>
+        <field name="model">cdp.trigger.log</field>
+        <field name="arch" type="xml">
+            <tree create="false" decoration-danger="state == 'error'">
+                <field name="create_date" string="Nhận lúc"/>
+                <field name="segment_id"/>
+                <field name="partner_id"/>
+                <field name="state"/>
+                <field name="result"/>
+            </tree>
+        </field>
+    </record>
+    <record id="cdp_trigger_log_view_form" model="ir.ui.view">
+        <field name="name">cdp.trigger.log.form</field>
+        <field name="model">cdp.trigger.log</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false">
+                <sheet>
+                    <group>
+                        <field name="trigger_id"/>
+                        <field name="segment_id"/>
+                        <field name="key"/>
+                        <field name="partner_id"/>
+                        <field name="state"/>
+                        <field name="result"/>
+                    </group>
+                    <field name="data" widget="text"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_cdp_trigger_log" model="ir.actions.act_window">
+        <field name="name">Trigger từ CDP</field>
+        <field name="res_model">cdp.trigger.log</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+</odoo>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <menuitem id="menu_cdp_root" name="CDP" sequence="45" groups="group_cdp_user"
+              web_icon="cdp_base,static/description/icon.png"/>
+    <menuitem id="menu_cdp_profiles" name="Hồ sơ" parent="menu_cdp_root" action="action_cdp_profile" sequence="10"/>
+    <menuitem id="menu_cdp_segments" name="Phân khúc" parent="menu_cdp_root" action="action_cdp_segment" sequence="20"/>
+    <menuitem id="menu_cdp_triggers" name="Trigger" parent="menu_cdp_root" action="action_cdp_trigger_log" sequence="30"/>
+    <menuitem id="menu_cdp_config" name="Cấu hình" parent="menu_cdp_root" sequence="90" groups="group_cdp_manager"/>
+    <menuitem id="menu_cdp_outbox" name="Outbox" parent="menu_cdp_config" action="action_cdp_outbox" sequence="10"/>
+    <menuitem id="menu_cdp_mapping" name="Mapping" parent="menu_cdp_config" action="action_cdp_mapping" sequence="20"/>
+    <menuitem id="menu_cdp_settings" name="Cài đặt" parent="menu_cdp_config" action="action_cdp_settings" sequence="30"/>
+</odoo>
