@@ -132,6 +132,13 @@ class CdpProfile(models.Model):
             add(_("Nguồn đầu tiên"), " / ".join(filter(None, [touch.get("source"), touch.get("medium"), touch.get("campaign")])))
         if t.get("stalled_courses"):
             add(_("Học dở"), ", ".join(f"{c.get('name')} ({c.get('completion')}%)" for c in t["stalled_courses"]))
+        if t.get("purchase_probability_30d") is not None:
+            add(_("Khả năng mua trong 30 ngày"), f"{round(100 * t['purchase_probability_30d'])}%")
+        add(_("Dự đoán sẽ mua"), ", ".join(f"{p.get('item')} ({round(100 * (p.get('probability') or 0))}%)"
+                                           for p in t.get("predicted_products") or []))
+        add(_("Điểm chạm tiếp theo"), ", ".join(
+            f"{n.get('label')} (~{n.get('expected_in_days')} ngày, {round(100 * (n.get('probability') or 0))}%)"
+            for n in t.get("next_touchpoints") or []))
         return Markup("<ul class='mb-0'>{}</ul>").format(Markup("").join(items)) if items else False
 
     # ------------------------------------------------------------------ API used by the controller

@@ -6,6 +6,9 @@
     DEMO_STEP=report ...
 """
 import os
+from datetime import timedelta
+
+from odoo import fields
 
 step = os.environ.get("DEMO_STEP", "seed")
 CORE_URL = os.environ.get("CDP_CORE_URL", "http://localhost:8000")
@@ -179,6 +182,36 @@ def rules():
     print("RULES OK", {"owner_list": owner_list.contact_count, "hot_list": hot_list.id})
 
 
+def touchpoints():
+    """More touchpoints from standard Odoo apps: CRM (lead from a website form, call done),
+    Events (webinar registration + attendance) and Email Marketing (sent / opened / clicked)."""
+    minh = env["res.partner"].search([("email", "=", "minh@anphuc.vn")], limit=1)
+    stages = env["crm.stage"].search([], order="sequence")
+    # A brand-new lead from a contact form: no partner yet, CDP links it by e-mail/phone.
+    env["crm.lead"].create({"name": "Form tư vấn Implant", "email_from": "lan.pham@nhakhoa-sao.vn",
+                            "phone": "0912 345 678", "contact_name": "Phạm Lan"})
+    lead = env["crm.lead"].create({"name": "Gói Implant Nâng cao cho đội ngũ An Phúc", "partner_id": minh.id,
+                                   "type": "opportunity", "stage_id": stages[0].id, "expected_revenue": 36000000})
+    lead.write({"stage_id": stages[1].id})
+    call = env.ref("mail.mail_activity_data_call")
+    lead.activity_schedule(activity_type_id=call.id, summary="Tư vấn gói đội ngũ",
+                           user_id=env.ref("base.user_admin").id).action_feedback(feedback="Hẹn demo tuần sau")
+    now = fields.Datetime.now()
+    webinar = env["event.event"].create({"name": "Webinar: Implant tức thì", "date_begin": now - timedelta(hours=3),
+                                         "date_end": now - timedelta(hours=1)})
+    env["event.registration"].create({"event_id": webinar.id, "partner_id": minh.id}).action_set_done()
+    mailing = env["mailing.mailing"].create({
+        "subject": "Ưu đãi Implant Nâng cao tháng 10", "body_html": "<p>Ưu đãi</p>",
+        "mailing_model_id": env["ir.model"]._get("res.partner").id})
+    trace = env["mailing.trace"].create({"trace_type": "mail", "mass_mailing_id": mailing.id, "model": "res.partner",
+                                         "res_id": minh.id, "email": minh.email})
+    trace.set_sent()
+    trace.set_opened()
+    trace.set_clicked()
+    env.cr.commit()
+    print("TOUCHPOINTS OK", {"lead": lead.id, "webinar": webinar.id, "mailing": mailing.id})
+
+
 def report():
     for p in env["res.partner"].search([("cdp_profile_ids", "!=", False)], order="id"):
         print(f"{p.name:<22} segments={p.cdp_segment_ids.mapped('key')} rfm={p.cdp_rfm_segment} "
@@ -189,4 +222,5 @@ def report():
         print(f"MAILING LIST {ml.name}: {', '.join(ml.contact_ids.mapped('email'))}")
 
 
-{"seed": seed, "send": send, "sepay_order": sepay_order, "rules": rules, "report": report}[step]()
+{"seed": seed, "send": send, "sepay_order": sepay_order, "rules": rules, "touchpoints": touchpoints,
+ "report": report}[step]()

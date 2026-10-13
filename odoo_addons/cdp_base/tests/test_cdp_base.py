@@ -1,6 +1,9 @@
+import hashlib
+import hmac
 import json
 import time
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from odoo.tests import HttpCase, TransactionCase, tagged
 
@@ -173,3 +176,29 @@ class TestReceiver(HttpCase):
         payload = {"trigger_id": "trg_42", "key": "hot_leads", "partner_id": partner.id, "data": {}}
         self.assertEqual(self._post("/cdp/v1/triggers", payload).json()["status"], "done")
         self.assertEqual(self._post("/cdp/v1/triggers", payload).json()["status"], "duplicate")
+
+
+@tagged("post_install", "-at_install")
+class TestJourneyEmbed(CdpCase):
+
+    def test_journey_embed_link_and_prediction_summary(self):
+        icp = self.env["ir.config_parameter"].sudo()
+        icp.set_param("cdp.public_url", "https://cdp.example.vn/")
+        icp.set_param("cdp.tenant_id", "dmag")
+        icp.set_param("cdp.secret", "s3cret")
+        partner = self.env["res.partner"].create({"name": "BS. Nam"})
+        self.assertFalse(partner.cdp_journey_html)  # no CDP profile yet
+        self.env["cdp.profile"]._cdp_upsert([{"partner_id": partner.id, "kind": "person", "traits": {
+            "purchase_probability_30d": 0.41,
+            "predicted_products": [{"item": "Implant Nâng cao", "probability": 0.37}],
+            "next_touchpoints": [{"label": "Xem khóa học", "expected_in_days": 3.5, "probability": 0.6}]}}])
+        partner.invalidate_recordset()
+        html = str(partner.cdp_journey_html)
+        self.assertIn("https://cdp.example.vn/embed/journey?tenant=dmag&amp;partner_id=%d" % partner.id, html)
+        url = partner._cdp_journey_url()
+        q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+        expected = hmac.new(b"s3cret", f"dmag.{partner.id}.{q['exp']}".encode(), hashlib.sha256).hexdigest()
+        self.assertEqual(q["sig"], expected)
+        summary = str(partner.cdp_summary_html)
+        self.assertIn("Implant Nâng cao (37%)", summary)
+        self.assertIn("41%", summary)

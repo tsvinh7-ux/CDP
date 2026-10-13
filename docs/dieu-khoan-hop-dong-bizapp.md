@@ -42,6 +42,8 @@
 - [ ] **E3.** Tiêu chí nghiệm thu cho từng hạng mục (test tự động, hiệu năng, bảo mật).
 - [ ] **E4.** Thời gian bảo hành sửa lỗi sau nghiệm thu; SLA hỗ trợ và vận hành (thời gian phản hồi theo mức độ).
 - [ ] **E5.** Hỗ trợ nâng cấp phiên bản Odoo (17 → 18/19): phạm vi, chi phí, thời hạn.
+- [ ] **E6.** Nếu Bizapp customize CRM, Sự kiện, Email Marketing hoặc Marketing Automation: giữ các điểm móc mà `cdp_crm`, `cdp_event`, `cdp_marketing_bridge` dùng (tạo/đổi giai đoạn lead, hoạt động đã làm, trạng thái đăng ký sự kiện, trạng thái email `mailing.trace`). Nếu buộc phải đổi, cung cấp điểm móc thay thế tương đương. Đây là nguồn điểm chạm cho hành trình khách và mô hình dự đoán.
+- [ ] **E7.** Cho phép hiển thị trang hành trình của CDP Core trong tab CDP 360 (iframe): không chặn bằng Content-Security-Policy; người dùng Odoo truy cập được địa chỉ CDP Core.
 
 ## F. Thương mại
 

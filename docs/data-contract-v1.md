@@ -69,7 +69,7 @@
 
 | Field | Bắt buộc | Mô tả |
 |------|:-------:|------|
-| `subject` | Có (trừ khi sự kiện không gắn với người) | Người mà sự kiện thuộc về. `identifiers` chỉ chứa giá trị đã chuẩn hóa (mục 6) |
+| `subject` | Có (trừ khi sự kiện không gắn với người) | Người mà sự kiện thuộc về. `identifiers` chỉ chứa giá trị đã chuẩn hóa (mục 6). Người chưa là partner (lead từ form, khách đăng ký sự kiện, người nhận email) dùng `model`/`id` của bản ghi đó và chỉ email/SĐT trong `identifiers`; Core nhận diện và gộp hồ sơ theo định danh |
 | `object` | Không | Thực thể nghiệp vụ liên quan |
 | `properties` | Có | Thuộc tính riêng theo `event_type` (mục 5) |
 | Thời gian | | Luôn là UTC, ISO 8601 |
@@ -189,8 +189,11 @@ Ví dụ:
 | `order.confirmed` | `sale.order.action_confirm` | `order_id`, `amount` (không ghi đè trạng thái đã thanh toán) |
 | `order.paid` | `payment.transaction` → `done` (VNPay IPN / webhook SePay) | `order_id`, `amount`, `provider` (`vnpay`, `sepay`), `transaction` |
 | `order.cancelled` / `refund.issued` | | `order_id`, `amount`, `reason_code` |
-| `lead.created` / `lead.stage_changed` | `crm.lead` | `lead_id`, `stage`, `source`, `medium`, `campaign`, `user_id` |
-| `marketing.message_sent` / `opened` / `clicked` / `bounced` / `unsubscribed` | Marketing Automation / mailing | `campaign_id`, `activity_id`, `channel` |
+| `lead.created` / `lead.stage_changed` / `lead.won` / `lead.lost` (`cdp_crm`) | `crm.lead` tạo, đổi giai đoạn, vào giai đoạn chốt, `action_set_lost` | `lead_id`, `type`, `stage`, `previous_stage`, `team`, `source`, `medium`, `campaign`, `expected_revenue`, `lost_reason`. Không gửi mô tả/ghi chú |
+| `sales.activity_done` (`cdp_crm`) | `mail.activity` được đánh dấu xong trên khách hoặc lead | `activity_type`, `summary` (tối đa 120 ký tự), `lead_id`. Không gửi feedback |
+| `event.registered` / `event.attended` / `event.cancelled` (`cdp_event`) | `event.registration` tạo / đổi trạng thái | `registration_id`, `event_id`, `event_name`, `event_type`, `date_begin`, `online` |
+| `marketing.email_sent` / `email_opened` / `email_clicked` / `email_replied` / `email_bounced` (`cdp_marketing_bridge`) | `mailing.trace` (Email Marketing, Marketing Automation) đổi trạng thái | `mailing_id`, `campaign`, `utm_campaign`, `recipient_model`. Một sự kiện cho mỗi email và trạng thái (`event_id` cố định) |
+| `marketing.message_sent` / `opened` / `clicked` / `bounced` / `unsubscribed` | Marketing Automation của Bizapp (nếu dùng kênh ngoài email) | `campaign_id`, `activity_id`, `channel` |
 | `marketing.participant_completed` | Marketing Automation | `campaign_id` |
 | `privacy.erasure_requested` | Nút "Yêu cầu xóa dữ liệu" (`cdp_base`) | `requested_by`. Core xóa dữ liệu, giữ tombstone, gỡ khỏi audience quảng cáo; Odoo đặt `cdp_excluded` |
 
@@ -204,7 +207,7 @@ Ví dụ:
 | `course.completed` | `completion` = 100 | `course_id`, `duration_days` |
 | `quiz.submitted` | Quiz của slide / `survey.user_input` | `course_id`, `score`, `passed` |
 | `certificate.issued` | `survey.user_input` chứng chỉ đạt | `course_id`, `certification_id` |
-| `webinar.registered` / `webinar.attended` | Theo module sự kiện Bizapp dùng (`event.registration`?) | `event_id` |
+| (webinar) | Dùng `event.registered` / `event.attended` của `cdp_event` (mục 5.1) | |
 
 ### 5.3. Dental (`cdp_dental`): khung, chốt khi có thiết kế Dental ERP
 
@@ -225,6 +228,13 @@ Trong `cdp_dental`, các sự kiện này được khai báo bằng **quy tắc 
 | `zalo.follow` / `zalo.unfollow` | Webhook OA | Định danh `zalo = <oa_id>:<user_id>` |
 | `zalo.user_submit_info` | Khách chia sẻ thông tin với OA | SĐT trong `info.phone` dùng để ghép với partner |
 | `zalo.user_send_text`… | Tin nhắn | Chỉ ghi nhận có tương tác, **không lưu nội dung** |
+| `zalo.user_received_message` / `zalo.user_seen_message` | Biên nhận tin ZNS | Gắn với lần gửi ZNS qua `tracking_id = cdp-<delivery_id>` |
+
+### 5.3c. Facebook Lead Ads (webhook vào Core: `POST /v1/webhooks/facebook/<tenant>`)
+
+| `event_type` | Nguồn | Ghi chú |
+|-------------|------|--------|
+| `facebook.lead_submitted` | Webhook `leadgen`, chi tiết lấy qua Graph API | Định danh: email, SĐT, `fb_lead`. `properties`: `form_id`, `ad_id`, `ad_name`, `campaign`, `full_name` (làm tên hồ sơ khi chưa có), `utm_source`/`utm_medium`/`utm_campaign` (nguồn đầu tiên). Chữ ký `X-Hub-Signature-256` (HMAC-SHA256 bằng `app_secret`) |
 
 Chữ ký: `X-ZEvent-Signature: mac=sha256(app_id + body + timestamp + oa_secret_key)`.
 

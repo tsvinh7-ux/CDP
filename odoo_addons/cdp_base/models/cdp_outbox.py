@@ -127,11 +127,13 @@ class CdpOutbox(models.Model):
         return msg
 
     @api.model
-    def _emit(self, event_type, partner=None, record=None, properties=None, occurred_at=None, event_id=None):
+    def _emit(self, event_type, partner=None, record=None, properties=None, occurred_at=None, event_id=None,
+              subject=None):
         """Queue a business event, e.g. ``_emit('order.paid', order.partner_id, order, {...})``.
 
         Backfills pass the historical `occurred_at` and a deterministic `event_id`
         (see `_history_event_id`) so a re-run never duplicates events in CDP.
+        `subject` identifies a person who is not a partner yet (see `_emit_contact`).
         """
         if not self._cdp_enabled():
             return self.browse()
@@ -142,11 +144,29 @@ class CdpOutbox(models.Model):
         if partner and self._is_internal_partner(partner):
             return self.browse()
         msg = self._envelope("event", event_type, record, partner, properties, occurred_at, event_id)
+        if subject and not partner:
+            msg["subject"] = subject
         return self.sudo().create({
             "event_id": msg["event_id"], "kind": "event", "event_type": event_type,
             "res_model": record._name if record else None, "res_id": record.id if record else None,
             "payload": json.loads(json.dumps(msg, default=_json_default)),
         })
+
+    @api.model
+    def _emit_contact(self, event_type, record, partner=None, email=None, phone=None, properties=None,
+                      event_id=None):
+        """Emit for a person who may not be a partner yet (CRM lead, event registration, mailing contact).
+
+        With a real partner this is `_emit`; otherwise the record's own e-mail/phone become the
+        subject and CDP Core resolves (or later merges) the profile by those identifiers.
+        """
+        if partner and not self._is_public_partner(partner):
+            return self._emit(event_type, partner, record, properties, event_id=event_id)
+        identifiers = {k: v for k, v in {"email": normalize_email(email), "phone": normalize_phone(phone)}.items() if v}
+        if not identifiers:
+            return self.browse()
+        return self._emit(event_type, None, record, properties, event_id=event_id,
+                          subject={"model": record._name, "id": record.id, "identifiers": identifiers})
 
     @api.model
     def _enqueue_entities(self, model_name, ids, deleted=False, merged_into=None):

@@ -38,7 +38,7 @@ wait_http "$CDP_CORE_URL/health"; wait_http http://localhost:9000/log
 
 echo "== 2. Odoo: cài database dmag + các module CDP (vài phút)"
 "$ODOO_PY" "$ODOO_SRC/odoo-bin" -c "$ODOO_CONF" -d dmag \
-  -i cdp_base,cdp_website,cdp_education,cdp_marketing_bridge,cdp_dental,payment_demo --stop-after-init \
+  -i cdp_base,cdp_website,cdp_education,cdp_marketing_bridge,cdp_dental,cdp_crm,cdp_event,payment_demo --stop-after-init \
   > "$LOGS/dmag-init.log" 2>&1
 
 echo "== 3. Dữ liệu mẫu: khóa học, 2 phòng khám, nhân sự đã học/mua (VNPay, SePay), consent"
@@ -66,13 +66,24 @@ sleep 70
 odoo_shell send
 run_jobs
 
-echo "== 9. Tenant thứ hai: phòng khám dùng Dental ERP"
+echo "== 9. Thêm điểm chạm: CRM (lead, cuộc gọi), sự kiện (webinar), email marketing (gửi/mở/click)"
+odoo_shell touchpoints
+odoo_shell send
+curl -s -X POST "$CDP_CORE_URL/v1/admin/models/train?tenant=dmag&token=$CDP_ADMIN_TOKEN" > /dev/null
+run_jobs
+
+echo "== 10. Tenant thứ hai: phòng khám dùng Dental ERP"
 "$CORE_PY" "$DEMO/core_steps.py" dental
 
-echo "== 10. Kết quả"
+echo "== 11. Tenant MÔ PHỎNG cho dashboard & mô hình dự đoán (${SIM_PEOPLE:-2000} người, 120 ngày – dữ liệu giả)"
+(cd "$REPO/core" && "$CORE_PY" -m cdp_core.simulate --people "${SIM_PEOPLE:-2000}" \
+   | "$CORE_PY" -c "import ast,sys; r=ast.literal_eval(sys.stdin.read()); m=r['models']; print('   →', r['people'], 'người,', r['events'], 'sự kiện | độ chính xác top-3 điểm chạm', m['next_touchpoint'].get('accuracy_at_3'), '(baseline', m['next_touchpoint'].get('baseline_accuracy_at_3'), ') | AUC mua', m['product_propensity'].get('auc'), '(baseline', m['product_propensity'].get('baseline_auc_popularity'), ')')")
+
+echo "== 12. Kết quả"
 odoo_shell report
 echo "-- Đã gửi tới (MOCK) Facebook/Zalo:"
 "$CORE_PY" "$DEMO/core_steps.py" summary
 "$CORE_PY" "$DEMO/browser.py" screens
 echo "Odoo:        http://localhost:8069  (admin/admin; portal: minh@anphuc.vn/demo1234)"
 echo "CDP console: $CDP_CORE_URL/console?token=$CDP_ADMIN_TOKEN&tenant=dmag"
+echo "Dashboard mô phỏng: $CDP_CORE_URL/console?token=$CDP_ADMIN_TOKEN&tenant=dmag_sim"

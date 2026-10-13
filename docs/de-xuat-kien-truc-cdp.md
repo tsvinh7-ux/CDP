@@ -1,6 +1,6 @@
 # Đề xuất kiến trúc CDP: add-on cho Dental ERP (Odoo 17) và DMAG
 
-> Phiên bản: 0.7 · Ngày: 13/10/2026
+> Phiên bản: 0.8 · Ngày: 13/10/2026
 >
 > Lịch sử thay đổi:
 > - **0.1**: module Odoo hay platform riêng.
@@ -30,6 +30,11 @@
 >   - console, Docker.
 >
 >   Xem [`huong-dan-trien-khai.md`](huong-dan-trien-khai.md).
+> - **0.8**: dashboard CDP, hành trình khách hàng và dự đoán:
+>   - phân loại điểm chạm: 8 kênh × 5 giai đoạn, phân biệt khách chủ động / DMAG chủ động;
+>   - thêm điểm chạm: CRM (`cdp_crm`), sự kiện/webinar (`cdp_event`), email marketing (gửi/mở/click), biên nhận ZNS, Facebook Lead Ads;
+>   - dự đoán điểm chạm tiếp theo và sản phẩm/dịch vụ sẽ mua trong 30 ngày, luôn so với baseline (mục 3.9);
+>   - dashboard trong console; hành trình nhúng vào tab **CDP 360** của Odoo.
 
 ## 0. Nhật ký quyết định
 
@@ -47,6 +52,8 @@
 | D10 | Hàng đợi ingest mặc định dùng PostgreSQL (đủ cho quy mô DMAG, không thêm hạ tầng); chuyển sang Redpanda bằng cấu hình khi lưu lượng tăng. Sự kiện được xuất sang ClickHouse để lưu dài hạn và phân tích | 13/10/2026 |
 | D11 | Tích hợp Dental ERP bằng quy tắc sự kiện cấu hình được (Automation Rules), không phụ thuộc tên model của Bizapp | 13/10/2026 |
 | D12 | Tin "care" (nhắc thanh toán, lịch hẹn) không cần consent tiếp thị; tin "marketing" cần opt-in và bị giới hạn tần suất chung trên mọi kênh (mặc định 1 tin/ngày, 3 tin/tuần) | 13/10/2026 |
+| D13 | Mô hình dự đoán bắt đầu bằng thuật toán đơn giản, giải thích được (chuỗi Markov, hồi quy logistic), chạy trong CDP Core, không cần dịch vụ ML riêng. Mô hình chỉ được dùng khi thắng baseline trên tập kiểm tra; mọi chỉ số hiển thị kèm baseline và cỡ mẫu | 13/10/2026 |
+| D14 | Hành trình khách hiển thị trong Odoo bằng trang nhúng từ CDP Core qua link ký HMAC, hết hạn sau 1 giờ; Odoo không lưu thêm dữ liệu sự kiện | 13/10/2026 |
 
 ## 1. Quyết định kiến trúc (đã chốt)
 
@@ -140,7 +147,9 @@ Ngoại lệ duy nhất là phòng khám cài on-premise không có internet. Tr
 | `cdp_base` | `base`, `mail`, `website` | Outbox + job gửi, đăng ký tenant/API key, mapping cấu hình được, model `cdp.profile` và `cdp.segment`, API nhận dữ liệu từ Core, gắn JS SDK vào website, widget 360 |
 | `cdp_education` | `cdp_base`, `website_slides`, `website_sale`, `survey` | Sự kiện eLearning (ghi danh, tiến độ, hoàn thành, chứng chỉ), giỏ hàng/đơn khóa học, tab 360 người học |
 | `cdp_dental` | `cdp_base`, các module Dental ERP | Sự kiện lịch hẹn, kế hoạch điều trị, thủ thuật, thanh toán; tab Patient 360 |
-| `cdp_marketing_bridge` | `cdp_base`, module MA của Bizapp | Cho phép chiến dịch MA lọc theo phân khúc CDP và bắt đầu từ trigger CDP; gửi kết quả MA về Core |
+| `cdp_marketing_bridge` | `cdp_base`, module MA của Bizapp | Cho phép chiến dịch MA lọc theo phân khúc CDP và bắt đầu từ trigger CDP; gửi kết quả email (gửi/mở/click/trả lời/bounce) về Core |
+| `cdp_crm` | `cdp_base`, `crm` | Điểm chạm bán hàng: lead mới (kể cả chưa có liên hệ, nhận diện qua email/SĐT), chuyển giai đoạn, chốt/mất, cuộc gọi/hoạt động đã làm. Không gửi mô tả lead hay ghi chú |
+| `cdp_event` | `cdp_base`, `event` | Đăng ký, tham dự, hủy sự kiện/webinar/hội thảo |
 
 ### 3.2. Lưu dữ liệu CDP trong Odoo: model riêng, không ghi vào `res.partner`
 
@@ -235,6 +244,41 @@ Yêu cầu thiết kế để gói Dedicated không tốn thêm công phát tri�
   - Mã Python của module Odoo không che giấu được thực sự, nên dựa vào **hợp đồng license (EULA)**: cấm sao chép, cấm bán lại, cấm reverse-engineer.
   - Core có thể giao dưới dạng container image thay vì mã nguồn.
 - **Nghĩa vụ giấy phép mã nguồn mở** chỉ thực sự phát sinh khi giao phần mềm cho khách: LGPL (lõi Odoo đã sửa), AGPL (nếu dùng module OCA giấy phép AGPL). Cần danh mục giấy phép (mục 6).
+
+### 3.9. Hành trình, dashboard và dự đoán
+
+**Điểm chạm.** Mỗi sự kiện được gán vào 1 trong 8 kênh và 1 trong 5 giai đoạn, kèm chiều tương tác: khách chủ động hay DMAG/CDP chủ động (ZNS, email, sales gọi).
+
+- **Kênh**: Website, Zalo, Facebook/quảng cáo, Email, Sales/CRM, Sự kiện/phòng khám, Học tập/điều trị, Đơn hàng/thanh toán.
+- **Giai đoạn**: Nhận biết → Cân nhắc → Ý định → Mua → Sử dụng & gắn bó.
+
+**Hành trình từng khách.** Console và tab CDP 360 trong Odoo hiện:
+
+- dải giai đoạn khách đã đạt tới;
+- các làn theo kênh, mỗi điểm chạm là một dấu theo thời gian;
+- vùng tương lai với điểm chạm dự đoán và xác suất.
+
+**Dự đoán.**
+
+| Dự đoán | Cách làm | Đánh giá |
+|---|---|---|
+| Điểm chạm tiếp theo (3 khả năng, kèm số ngày dự kiến) | Chuỗi Markov bậc 2, lùi về bậc 1 và tần suất chung khi thiếu dữ liệu; thời gian = trung vị khoảng cách giữa hai điểm chạm | Độ chính xác top-3 trên khoảng 20% khách để riêng (không dùng khi huấn luyện), so với baseline "luôn đoán 3 điểm chạm phổ biến nhất" |
+| Sản phẩm/dịch vụ sẽ mua trong 30 ngày (top 3, xác suất, lý do, giá trị kỳ vọng) | Hồi quy logistic trên ảnh chụp dữ liệu tại thời điểm T0 = hôm nay − 30 ngày, nhãn = có mua trong 30 ngày sau. Đặc trưng: mua kèm, độ phổ biến, lượt xem, giỏ hàng, đồng nghiệp cùng phòng khám, lộ trình cơ bản → nâng cao, mức tương tác, hoạt động 7 ngày, số đơn | AUC trên cùng nhóm khoảng 20% khách để riêng, so với baseline "xếp theo độ phổ biến". Dưới 15 lượt mua thì dùng trọng số quy tắc và ghi rõ |
+
+Các nguyên tắc chung:
+
+- Mô hình được huấn luyện lại mỗi ngày trong job định kỳ, hoặc bằng nút trong console.
+- Kết quả được ghi thành trait, nên dùng được ngay trong phân khúc. Ví dụ phân khúc có sẵn "Dự đoán mua trong 30 ngày (≥ 50%)".
+
+**Dashboard.**
+
+- KPI so với kỳ trước: doanh thu, khách hoạt động, hồ sơ mới, tỷ lệ mua, đơn hàng, giá trị đơn trung bình, doanh thu dự đoán, số khách có khả năng mua.
+- Biểu đồ: khách hoạt động và doanh thu theo ngày, phễu chuyển đổi, điểm chạm theo giai đoạn và theo kênh mỗi tuần.
+- Dự báo: sản phẩm sẽ bán, điểm chạm 7 ngày tới.
+- Doanh thu theo nguồn, phân khúc lớn nhất, chất lượng mô hình.
+- Mọi biểu đồ có chế độ bảng, chú thích và giao diện tối.
+
+> **Lưu ý trung thực về số liệu.** Các chỉ số mô hình trong demo tính trên **dữ liệu mô phỏng theo kịch bản**, nên rất dễ đoán. Chúng chỉ chứng minh pipeline huấn luyện và đánh giá chạy đúng, không phải độ chính xác trên khách thật. Số thật sẽ có sau 1–2 tháng chạy trên dữ liệu DMAG. Khi đó cần kiểm tra mô hình có thắng baseline rõ ràng không rồi mới dùng để kích hoạt.
 
 ## 4. Tenant DMAG: use-case ưu tiên
 

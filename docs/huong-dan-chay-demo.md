@@ -8,12 +8,14 @@ Triển khai production xem [`huong-dan-trien-khai.md`](huong-dan-trien-khai.md)
 
 | Thành phần | Thư mục | Vai trò |
 |-----------|--------|--------|
-| CDP Core | `core/` | Nhận sự kiện (outbox Odoo, web SDK, webhook Zalo); hợp nhất danh tính; traits (RFM, điểm lead, gợi ý khóa học, nha khoa); phân khúc; consent và quyền dữ liệu; kênh kích hoạt (Facebook CAPI, Custom Audiences, Zalo ZNS); hàng đợi (PostgreSQL/Redpanda); xuất ClickHouse; đối soát; console |
+| CDP Core | `core/` | Nhận sự kiện (outbox Odoo, web SDK, webhook Zalo, Facebook Lead Ads); hợp nhất danh tính; traits (RFM, điểm lead, gợi ý khóa học, nha khoa); **hành trình điểm chạm và dự đoán** (điểm chạm tiếp theo, sản phẩm sẽ mua); phân khúc; consent và quyền dữ liệu; kênh kích hoạt (Facebook CAPI, Custom Audiences, Zalo ZNS); hàng đợi (PostgreSQL/Redpanda); xuất ClickHouse; đối soát; console có **dashboard** |
 | `cdp_base` | `odoo_addons/` | Outbox, mapping, backfill, API nhận dữ liệu, `cdp.profile`, consent, yêu cầu xóa dữ liệu, tab **CDP 360** |
 | `cdp_website` | `odoo_addons/` | SDK trên website (tôn trọng cookie bar), trang **Quyền riêng tư** cho khách |
 | `cdp_education` | `odoo_addons/` | Sự kiện eLearning, giỏ hàng, VNPay/SePay, backfill lịch sử |
 | `cdp_marketing_bridge` | `odoo_addons/` | Email marketing theo phân khúc, đồng bộ mailing list, quy tắc trigger (việc cho sales, mailing list, Marketing Automation) |
 | `cdp_dental` | `odoo_addons/` | Quy tắc sự kiện cấu hình được cho model của Dental ERP |
+| `cdp_crm` | `odoo_addons/` | Điểm chạm CRM: lead, chuyển giai đoạn, chốt/mất, cuộc gọi đã làm |
+| `cdp_event` | `odoo_addons/` | Điểm chạm sự kiện/webinar: đăng ký, tham dự, hủy |
 | Web SDK | `sdk/web/cdp.js` | page/track/identify, video YouTube/HTML5/Drive, fbp/fbc, cookie bar |
 | Docker | `core/Dockerfile`, `docker-compose.yml` | PostgreSQL, ClickHouse, Redpanda (tùy chọn), API, consumer, worker |
 
@@ -28,7 +30,9 @@ Triển khai production xem [`huong-dan-trien-khai.md`](huong-dan-trien-khai.md)
 | 6 | Trình duyệt: khách ẩn danh từ Facebook xem khóa Nâng cao 3 lần → đăng nhập → *Add to Cart*; BS. Hòa đặt đơn chọn SePay | Lịch sử ẩn danh gộp vào hồ sơ BS. Minh; vào "Quan tâm cao" |
 | 7 | Webhook Zalo OA (có ký): BS. Minh quan tâm OA, chia sẻ SĐT | Zalo ID gắn vào hồ sơ BS. Minh |
 | 8 | Sau 1 phút | "Bỏ giỏ hàng" (Minh): ZNS bị **chặn bởi giới hạn tần suất** (đã nhận 1 tin tiếp thị trong ngày). "Chờ chuyển khoản" (Hòa): ZNS loại **care** vẫn gửi dù Hòa chưa đồng ý tiếp thị |
-| 9 | Tenant thứ hai: phòng khám dùng Dental ERP (sự kiện mô phỏng) | Hồ sơ bệnh nhân: đến hạn tái khám, kế hoạch điều trị chưa chốt, nguy cơ vắng mặt, trả góp quá hạn |
+| 9 | Thêm điểm chạm từ app chuẩn của Odoo: lead từ form (chưa có liên hệ), cơ hội của BS. Minh chuyển giai đoạn, cuộc gọi tư vấn đã làm, BS. Minh tham dự webinar, nhận/mở/click email ưu đãi | Lead form được nhận diện qua email/SĐT. Hành trình của BS. Minh có thêm các kênh Sales/CRM, Sự kiện, Email; tab CDP 360 hiện hành trình nhúng |
+| 10 | Tenant thứ hai: phòng khám dùng Dental ERP (sự kiện mô phỏng) | Hồ sơ bệnh nhân: đến hạn tái khám, kế hoạch điều trị chưa chốt, nguy cơ vắng mặt, trả góp quá hạn |
+| 11 | Tenant **mô phỏng** `dmag_sim`: 2.000 người, 120 ngày hành vi giả lập (xem khóa, đăng ký, Zalo, email, webinar, sales, giỏ hàng, VNPay/SePay, học, lên Nâng cao, ảnh hưởng đồng nghiệp); huấn luyện mô hình | Dashboard và mô hình dự đoán có đủ dữ liệu để xem. Console ghi rõ **"Dữ liệu mô phỏng – không phải số liệu thật"** |
 
 Ngưỡng 1 phút chỉ để demo; thực tế cấu hình theo tenant.
 
@@ -63,8 +67,9 @@ cd core && pytest                                    # SQLite; 2 test hạ tần
 CDP_TEST_DATABASE_URL=postgresql+psycopg://cdp:cdp@localhost/cdp_core_test \
 CDP_TEST_CLICKHOUSE_URL=http://cdp:cdp@localhost:8123/cdp CDP_TEST_KAFKA=1 pytest   # PostgreSQL + ClickHouse + Redpanda thật
 odoo-bin -c odoo.conf -d cdp_test --db-filter='^cdp_test$' \
-  -i cdp_base,cdp_website,cdp_education,cdp_marketing_bridge,cdp_dental \
-  --test-enable --test-tags /cdp_base,/cdp_website,/cdp_education,/cdp_marketing_bridge,/cdp_dental --stop-after-init
+  -i cdp_base,cdp_website,cdp_education,cdp_marketing_bridge,cdp_dental,cdp_crm,cdp_event \
+  --test-enable --test-tags /cdp_base,/cdp_website,/cdp_education,/cdp_marketing_bridge,/cdp_dental,/cdp_crm,/cdp_event \
+  --stop-after-init
 ```
 
 ## 5. Phần cần thông tin/tài khoản thật để hoàn tất
@@ -77,7 +82,8 @@ odoo-bin -c odoo.conf -d cdp_test --db-filter='^cdp_test$' \
 | Sự kiện Dental ERP | Tên model/field của Dental ERP để khai báo quy tắc trong `cdp_dental` | Bizapp |
 | Thanh toán | `code` của provider VNPay/SePay của Bizapp | Bizapp |
 | Hợp đồng | Checklist [`dieu-khoan-hop-dong-bizapp.md`](dieu-khoan-hop-dong-bizapp.md) | DMAG + luật sư |
-| AI | Điểm lead hiện tính theo quy tắc. Sau 3–6 tháng có dữ liệu kết quả (mua hay không) thì huấn luyện mô hình thay thế | DMAG + đội CDP |
+| AI | Mô hình dự đoán đã có (mục 3.9 bản đề xuất) và tự huấn luyện mỗi ngày. Số liệu trong demo tính trên dữ liệu mô phỏng nên **chưa nói lên độ chính xác thật**. Sau 1–2 tháng dữ liệu DMAG: xem bảng "Chất lượng mô hình", chỉ dùng để kích hoạt khi thắng baseline rõ ràng. Điểm lead vẫn tính theo quy tắc | DMAG + đội CDP |
+| Facebook Lead Ads | App Facebook có quyền `leads_retrieval`, Page access token, đăng ký webhook `leadgen` trỏ tới `/v1/webhooks/facebook/dmag` | DMAG |
 
 ## 6. Ảnh chụp từ lần chạy demo
 
@@ -96,3 +102,7 @@ odoo-bin -c odoo.conf -d cdp_test --db-filter='^cdp_test$' \
 | Console: doanh thu theo nguồn | ![](demo/11-console-doanh-thu-theo-nguon.png) |
 | Console: hồ sơ BS. Minh | ![](demo/12-console-ho-so.png) |
 | Console: tenant phòng khám (Dental ERP) | ![](demo/13-console-nha-khoa.png) |
+| Console: **dashboard** (tenant mô phỏng): KPI so với kỳ trước, khách hoạt động, doanh thu, phễu, điểm chạm theo giai đoạn/kênh, dự báo sản phẩm và điểm chạm, chất lượng mô hình so với baseline | ![](demo/14-console-dashboard.png) |
+| Console: **hành trình** một khách (làn theo kênh, giai đoạn, vùng dự đoán) và **dự đoán** (khả năng mua 30 ngày, sản phẩm/dịch vụ sẽ mua kèm lý do, điểm chạm tiếp theo) | ![](demo/15-console-hanh-trinh-du-doan.png) |
+| Odoo: tab **CDP 360** của BS. Minh với hành trình nhúng từ CDP Core | ![](demo/16-odoo-cdp-360-hanh-trinh.png) |
+| Console: dashboard ở giao diện tối | ![](demo/17-console-dashboard-dark.png) |

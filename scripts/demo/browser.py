@@ -1,7 +1,7 @@
 """Browser part of the demo (Playwright).
 
     python browser.py journey   # real visitor on the Odoo eLearning site (SDK → CDP Core)
-    python browser.py screens   # screenshots of Odoo back-office + CDP console
+    python browser.py screens   # screenshots of Odoo back-office + CDP console (dashboard, journey)
 """
 import os
 import sys
@@ -97,6 +97,13 @@ def screens():
         page.click("a:has-text('CDP 360')")
         page.wait_for_timeout(1500)
         shot(page, "02-odoo-ho-so-cdp-360.png")
+        # Journey + predictions embedded from CDP Core (signed link, 1 hour).
+        frame = page.frame_locator("iframe[title='Hành trình khách hàng']")
+        frame.locator("#journey svg").wait_for(timeout=20000)
+        page.locator("iframe[title='Hành trình khách hàng']").scroll_into_view_if_needed()
+        page.wait_for_timeout(500)
+        page.screenshot(path=os.path.join(OUT, "16-odoo-cdp-360-hanh-trinh.png"))
+        print("   16-odoo-cdp-360-hanh-trinh.png")
 
         for action, name in (("cdp_base.action_cdp_trigger_log", "03-odoo-trigger.png"),
                              ("cdp_base.action_cdp_segment", "04-odoo-phan-khuc.png")):
@@ -115,7 +122,9 @@ def screens():
 
         console = f"{CORE}/console?token={TOKEN}&tenant=dmag"
         page.goto(console)
-        page.wait_for_timeout(2500)
+        page.wait_for_selector("#d-models .viz-head")
+        page.click("nav button[data-tab=overview]")
+        page.wait_for_timeout(1000)
         shot(page, "08-console-tong-quan.png")
         page.click("nav button[data-tab=segments]")
         page.click("#sb-new")
@@ -147,6 +156,30 @@ def screens():
         page.click("#profiles tr.click:has-text('Nam')")
         page.wait_for_timeout(1500)
         shot(page, "13-console-nha-khoa.png")
+
+        # Simulated tenant: dashboard, journey and predictions with enough data for the models.
+        sim = f"{CORE}/console?token={TOKEN}&tenant=dmag_sim"
+        page.goto(sim)
+        page.wait_for_selector("#d-models .mq", timeout=60000)
+        page.wait_for_timeout(500)
+        shot(page, "14-console-dashboard.png")
+        buyer = page.evaluate("""async () => {
+            const r = await fetch('/v1/admin/profiles?limit=500&tenant=dmag_sim&token=' + new URLSearchParams(location.search).get('token'));
+            const ps = await r.json();
+            return ps.filter(p => p.kind === 'person' && p.total_spent).sort((a, b) => (b.lead_score || 0) - (a.lead_score || 0))[0].id;
+        }""")
+        page.click("nav button[data-tab=profiles]")
+        page.evaluate(f"show('{buyer}')")
+        page.wait_for_selector("#j-journey svg", timeout=20000)
+        page.wait_for_timeout(500)
+        page.locator("#detail").screenshot(path=os.path.join(OUT, "15-console-hanh-trinh-du-doan.png"))
+        print("   15-console-hanh-trinh-du-doan.png")
+        dark = browser.new_context(viewport={"width": 1440, "height": 1000}, locale="vi-VN", color_scheme="dark").new_page()
+        dark.goto(sim)
+        dark.wait_for_selector("#d-models .mq", timeout=60000)
+        dark.wait_for_timeout(500)
+        dark.screenshot(path=os.path.join(OUT, "17-console-dashboard-dark.png"))
+        print("   17-console-dashboard-dark.png")
         browser.close()
     print("Screenshots in", os.path.abspath(OUT))
 

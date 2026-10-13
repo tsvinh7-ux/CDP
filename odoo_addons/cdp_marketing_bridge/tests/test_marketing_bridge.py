@@ -77,3 +77,22 @@ class TestMarketingBridge(TransactionCase):
         result = rule._do_ma(self.env["res.partner"].browse(contact.id))
         self.assertTrue(result.startswith("mailing.subscription,"))
         self.assertEqual(rule._do_ma(self.env["res.partner"].browse(contact.id)), "ma_campaign: đã có trong chiến dịch")
+
+    def test_mailing_traces_become_touchpoints(self):
+        self.env["ir.config_parameter"].sudo().set_param("cdp.enabled", "1")
+        mailing = self.env["mailing.mailing"].create({"subject": "Ưu đãi Implant T10", "body_html": "<p>Hi</p>",
+                                                      "mailing_model_id": self.env["ir.model"]._get("res.partner").id})
+        trace = self.env["mailing.trace"].create({"trace_type": "mail", "mass_mailing_id": mailing.id,
+                                                  "model": "res.partner", "res_id": self.owner.id,
+                                                  "email": self.owner.email})
+        trace.set_sent()
+        trace.set_opened()
+        trace.set_opened()  # a second open of the same e-mail is not a new touchpoint
+        trace.set_clicked()
+        trace.set_clicked()
+        outbox = self.env["cdp.outbox"].search([("res_model", "=", "mailing.trace"), ("res_id", "=", trace.id)])
+        self.assertEqual(sorted(outbox.mapped("event_type")),
+                         ["marketing.email_clicked", "marketing.email_opened", "marketing.email_sent"])
+        sent = outbox.filtered(lambda e: e.event_type == "marketing.email_sent")
+        self.assertEqual(sent.payload["subject"]["id"], self.owner.id)
+        self.assertEqual(sent.payload["properties"]["campaign"], "Ưu đãi Implant T10")
