@@ -42,6 +42,7 @@
   const money = (v) => compact(v) + (Math.abs(v) >= 1e3 ? "" : "đ");
   const pct = (v, d = 0) => (v == null ? "–" : (v * 100).toFixed(d).replace(".", ",") + "%");
   const day = (iso) => { const d = new Date(iso); return `${d.getDate()}/${d.getMonth() + 1}`; };
+  const inDays = (d) => (d < 1 ? "trong ngày" : `~${nf.format(d)} ngày`);
   const dateTime = (iso) => new Date(iso).toLocaleString("vi-VN", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
   function niceMax(v) {
     if (v <= 0) return 1;
@@ -276,7 +277,7 @@
     const stName = Object.fromEntries(stages.map((st) => [st.key, st.label]));
     const tableRows = tps.map((t) => ({when: dateTime(t.at), kind: t.direction === "out" ? "DMAG/CDP chủ động" : "Khách chủ động",
       channel: chName[t.channel], stage: stName[t.stage], label: t.label}))
-      .concat(preds.map((p) => ({when: `~${nf.format(p.expected_in_days)} ngày tới`, kind: `Dự đoán ${pct(p.probability)}`,
+      .concat(preds.map((p) => ({when: p.expected_in_days < 1 ? "trong ngày" : `~${nf.format(p.expected_in_days)} ngày tới`, kind: `Dự đoán ${pct(p.probability)}`,
         channel: chName[p.channel], stage: stName[p.stage], label: p.label})));
     const body = card(container, {title: opts.title || "Hành trình khách hàng",
       sub: `${tps.length} điểm chạm · giai đoạn đã tới: ${stName[data.stage_reached] || "–"}`, columns, rows: tableRows});
@@ -296,13 +297,20 @@
     const W = width(body, 900), labelW = Math.min(170, W * 0.25), laneH = 36, top = 18, axisH = 24;
     const H = top + used.length * laneH + axisH;
     const s = svg("svg", {class: "viz-svg", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Hành trình theo kênh"}, body);
-    const first = new Date(tps[0].at);
-    const horizon = Math.min(30, Math.max(7, ...preds.map((p) => p.expected_in_days + 2)));
-    const end = new Date(now.getTime() + horizon * 864e5);
+    // Two-part time axis: history on the left (its own scale, so a journey of a few minutes is still
+    // readable), forecast on the right. The "today" line separates them.
+    const first = new Date(Math.min(new Date(tps[0].at).getTime(), now.getTime() - 60e3));
+    const horizon = Math.ceil(Math.min(30, Math.max(7, ...preds.map((p) => p.expected_in_days + 2))));
     const x0 = labelW + 12, x1 = W - 30;
-    const span = Math.max(864e5, end - first);
-    const x = (d) => x0 + ((new Date(d) - first) / span) * (x1 - x0);
-    const nowX = x(now);
+    const nowX = x0 + (x1 - x0) * (preds.length ? 0.74 : 0.97);
+    const pastSpan = Math.max(60e3, now - first);
+    const x = (d) => {
+      const t = new Date(d).getTime();
+      if (t <= now.getTime()) return x0 + ((t - first.getTime()) / pastSpan) * (nowX - x0);
+      return nowX + Math.min(1, (t - now.getTime()) / (horizon * 864e5)) * (x1 - nowX);
+    };
+    const short = pastSpan < 2 * 864e5;
+    const tickFmt = (d) => short ? d.toLocaleTimeString("vi-VN", {hour: "2-digit", minute: "2-digit"}) : day(d.toISOString());
     // Future zone + today line.
     svg("rect", {x: nowX, y: top - 14, width: x1 - nowX + 20, height: used.length * laneH + 14, fill: "var(--future-wash)"}, s);
     svg("line", {class: "axis", x1: nowX, x2: nowX, y1: top - 14, y2: top + used.length * laneH}, s);
@@ -314,12 +322,14 @@
       svg("rect", {x: 0, y: yc - 5, width: 10, height: 10, rx: 2, fill: channelColor(c.key)}, s);
       text(s, 16, yc + 4, c.label, {class: "ink2"});
     });
-    // Time axis.
-    const ticks = 6;
-    for (let k = 0; k <= ticks; k++) {
-      const d = new Date(first.getTime() + (span * k) / ticks);
-      text(s, x(d), H - 6, day(d.toISOString()), {"text-anchor": "middle"});
+    // Time axis: ticks for the history, then "+N ngày" for the forecast.
+    const ticks = Math.max(2, Math.min(5, Math.floor((nowX - x0) / 90)));
+    for (let k = 0; k < ticks; k++) {
+      const d = new Date(first.getTime() + (pastSpan * k) / ticks);
+      text(s, x(d), H - 6, tickFmt(d), {"text-anchor": k ? "middle" : "start"});
     }
+    text(s, nowX, H - 6, "hôm nay", {"text-anchor": "middle", class: "ink2"});
+    if (preds.length) text(s, x1, H - 6, `+${horizon} ngày`, {"text-anchor": "end"});
     const laneY = Object.fromEntries(used.map((c, i) => [c.key, top + i * laneH + laneH / 2]));
     // Past touchpoints (light jitter for markers closer than 7px in the same lane).
     const lastX = {};
@@ -348,7 +358,7 @@
       text(s, px, py - 10, pct(p.probability), {"text-anchor": "middle", class: "ink"});
       const hit = svg("circle", {cx: px, cy: py, r: 14, class: "hit"}, s);
       hover(hit, `${p.label} – ${pct(p.probability)}`, [{color, text: `Dự đoán · ${chName[p.channel]}`},
-        {text: `khoảng ${nf.format(p.expected_in_days)} ngày tới`}]);
+        {text: p.expected_in_days < 1 ? "trong ngày" : `khoảng ${nf.format(p.expected_in_days)} ngày tới`}]);
     });
     const lg = h("div", {class: "viz-legend"}, body);
     stages.forEach((st) => { const it = h("span", {}, lg); const sw = h("i", {class: "dot"}, it); sw.style.background = stageColor(st.key); h("span", {}, it, st.label); });
@@ -363,10 +373,13 @@
     const pr = data.predictions || {};
     const products = pr.products || [], nexts = pr.next_touchpoints || [];
     const chName = Object.fromEntries(data.meta.channels.map((c) => [c.key, c.label]));
-    const body = card(container, {title: "Dự đoán", sub: "Mô hình CDP – cập nhật mỗi ngày",
+    const heuristic = pr.product_mode === "heuristic";
+    const body = card(container, {title: "Dự đoán", sub: heuristic
+        ? "Chưa đủ lịch sử mua để huấn luyện: số % là điểm ước lượng theo quy tắc, chưa phải xác suất đã kiểm chứng"
+        : "Mô hình CDP – huấn luyện lại mỗi ngày",
       columns: [{key: "kind", label: "Loại"}, {key: "what", label: "Nội dung"}, {key: "p", label: "Xác suất", num: true}, {key: "more", label: "Chi tiết"}],
       rows: products.map((p) => ({kind: "Sẽ mua", what: p.item, p: pct(p.probability), more: (p.reasons || []).join("; ")}))
-        .concat(nexts.map((n) => ({kind: "Điểm chạm tiếp theo", what: n.label, p: pct(n.probability), more: `~${nf.format(n.expected_in_days)} ngày · ${chName[n.channel]}`})))});
+        .concat(nexts.map((n) => ({kind: "Điểm chạm tiếp theo", what: n.label, p: pct(n.probability), more: `${inDays(n.expected_in_days)} · ${chName[n.channel]}`})))});
     if (pr.purchase_probability_30d != null) {
       const t = h("div", {class: "viz-tile", style: "margin-bottom:12px"}, body);
       h("div", {class: "label"}, t, "Khả năng mua ít nhất 1 sản phẩm/dịch vụ trong 30 ngày");
@@ -392,7 +405,7 @@
       const row = h("div", {style: "display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0"}, body);
       const sw = h("i", {style: "width:10px;height:10px;border-radius:2px;display:inline-block;flex:none"}, row); sw.style.background = channelColor(n.channel);
       h("span", {style: "flex:1"}, row, `${n.label} (${chName[n.channel]})`);
-      h("span", {class: "viz-sub", style: "margin:0"}, row, `~${nf.format(n.expected_in_days)} ngày`);
+      h("span", {class: "viz-sub", style: "margin:0"}, row, inDays(n.expected_in_days));
       h("b", {}, row, pct(n.probability));
     }
   }

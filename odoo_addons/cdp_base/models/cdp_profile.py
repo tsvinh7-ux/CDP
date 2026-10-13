@@ -137,7 +137,8 @@ class CdpProfile(models.Model):
         add(_("Dự đoán sẽ mua"), ", ".join(f"{p.get('item')} ({round(100 * (p.get('probability') or 0))}%)"
                                            for p in t.get("predicted_products") or []))
         add(_("Điểm chạm tiếp theo"), ", ".join(
-            f"{n.get('label')} (~{n.get('expected_in_days')} ngày, {round(100 * (n.get('probability') or 0))}%)"
+            "{} ({}, {}%)".format(n.get("label"), "trong ngày" if (n.get("expected_in_days") or 0) < 1
+                                  else f"~{n.get('expected_in_days')} ngày", round(100 * (n.get("probability") or 0)))
             for n in t.get("next_touchpoints") or []))
         return Markup("<ul class='mb-0'>{}</ul>").format(Markup("").join(items)) if items else False
 

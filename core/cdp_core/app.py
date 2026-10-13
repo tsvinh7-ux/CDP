@@ -16,7 +16,7 @@ from . import touchpoints as tp
 from .config import settings
 from .db import init_db, session_scope
 from .destinations.zalo import verify_webhook
-from .models import Delivery, Destination, Event, MergeSuggestion, PrivacyRequest, Profile, Segment, Tenant, utcnow
+from .models import Delivery, Destination, Event, MergeSuggestion, MLModel, PrivacyRequest, Profile, Segment, Tenant, utcnow
 from .traits import iso
 
 _logger = logging.getLogger(__name__)
@@ -443,6 +443,11 @@ def reconcile(tenant: str):
 
 # --------------------------------------------------------------------------- journey, dashboard, models
 
+def _product_mode(session, tenant_id: str) -> str | None:
+    m = session.get(MLModel, (tenant_id, "product_propensity"))
+    return (m.metrics or {}).get("mode") if m else None
+
+
 def journey_doc(session, tenant: Tenant, profile: Profile) -> dict:
     t = profile.traits or {}
     points = tp.for_profile(session, tenant.id, profile.id)
@@ -458,7 +463,8 @@ def journey_doc(session, tenant: Tenant, profile: Profile) -> dict:
         "touchpoints": [x.as_dict() for x in points],
         "predictions": {"next_touchpoints": t.get("next_touchpoints") or [],
                         "products": t.get("predicted_products") or [],
-                        "purchase_probability_30d": t.get("purchase_probability_30d")},
+                        "purchase_probability_30d": t.get("purchase_probability_30d"),
+                        "product_mode": _product_mode(session, tenant.id)},
         "meta": tp.meta(),
     }
 
