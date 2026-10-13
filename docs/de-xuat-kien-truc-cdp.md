@@ -1,233 +1,247 @@
 # Đề xuất kiến trúc CDP: add-on cho Dental ERP (Odoo 17) và DMAG
 
-> Phiên bản: 0.3 · Ngày: 13/10/2026
+> Phiên bản: 0.4 · Ngày: 13/10/2026
 >
 > Lịch sử thay đổi:
-> - **0.1**: phân tích module Odoo hay platform riêng.
-> - **0.2**: bối cảnh DMAG (đào tạo nha khoa, ~100–150k nhân sự nha khoa, kênh web + Zalo + Facebook, Odoo do Bizapp customize đã có Marketing Automation).
-> - **0.3**: DMAG sẽ **bán Dental ERP trên nền Odoo cho phòng khám**, CDP trở thành **add-on bán kèm**. Bản này thay thế giả định ở 0.2 là "phòng khám không dùng Odoo".
+> - **0.1**: module Odoo hay platform riêng.
+> - **0.2**: bối cảnh DMAG.
+> - **0.3**: CDP là add-on của Dental ERP.
+> - **0.4**:
+>   - **Chốt quyết định kiến trúc** kèm ước tính tải.
+>   - Bỏ engine "Lite" chạy trong Odoo.
+>   - Marketing Automation do Bizapp tự viết.
+>   - Code thuộc DMAG.
+>   - Web bán khóa học là eLearning trên Odoo của DMAG.
+>   - Thêm data contract v1 (xem [`data-contract-v1.md`](data-contract-v1.md)).
 
-## 1. Tóm tắt kết luận
+## 1. Quyết định kiến trúc (đã chốt)
 
-Từ trải nghiệm của khách hàng, **CDP là một add-on của Odoo**: phòng khám mua, cài vào Dental ERP, bật lên, và dùng ngay trong giao diện Odoo, không phải mở phần mềm khác.
+**CDP Core chạy riêng, là dịch vụ độc lập và multi-tenant. Odoo chỉ cài module kết nối và giao diện (add-on).**
 
-Bên dưới, phần xử lý nặng chạy trên **một dịch vụ CDP Core trung tâm, multi-tenant, do DMAG vận hành**: tracking, hợp nhất danh tính, AI, tích hợp Zalo/Facebook, tính toán phân khúc.
+| Thành phần | Chạy ở đâu | Làm gì |
+|-----------|-----------|-------|
+| **CDP Core** | Hạ tầng riêng của DMAG (cloud tại VN) | Thu thập sự kiện, hợp nhất danh tính, hồ sơ, trait, AI, phân khúc, tích hợp Zalo/Facebook/TikTok, metering |
+| **Add-on Odoo** (`cdp_base`, `cdp_education`, `cdp_dental`, `cdp_marketing_bridge`) | Trong Odoo DMAG và từng Dental ERP | Gửi sự kiện (outbox), nhận phân khúc/trait, giao diện 360 + phân khúc + kích hoạt, nối vào Marketing Automation, gắn tracking SDK vào website |
 
-Mô hình này giống cách chính Odoo làm các dịch vụ IAP (SMS, số hóa hóa đơn bằng OCR, làm giàu thông tin lead): module trong Odoo chỉ là giao diện + connector, còn "bộ não" chạy tập trung ở cloud và tính phí theo gói hoặc theo lượt dùng.
+Người dùng vẫn làm việc hoàn toàn trong Odoo. Odoo **không** lưu sự kiện hành vi và **không** chạy tính toán phân khúc.
 
-```
- ┌───────────────────── Odoo của từng khách hàng ─────────────────────┐
- │  DMAG (đào tạo)    Phòng khám A    Phòng khám B    Chuỗi C (3 CN)   │
- │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ │
- │  │ cdp_connector │ │ cdp_connector │ │ cdp_connector │ │ cdp_connector │ │  ← add-on Odoo
- │  │ + education   │ │ + dental      │ │ + dental      │ │ + dental      │ │    (UI, outbox, kích hoạt)
- │  └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ │
- └─────────┼────────────────┼────────────────┼────────────────┼─────────┘
-           └────────────────┴───── HTTPS ────┴────────────────┘
-                                    ▼
-           ┌──────────────────────────────────────────────────┐
-           │ CDP Core (SaaS, multi-tenant, DMAG vận hành)       │
-           │ tracking · identity · profile · traits · AI ·      │
-           │ phân khúc · Zalo/Facebook/ads · billing theo tenant│
-           └──────────────────────────────────────────────────┘
-```
+### 1.1. Vì sao: ước tính tải nếu chạy CDP trong Odoo
 
-**Vì sao không làm CDP thuần trong module Odoo, dù khách hàng đều dùng Odoo?**
+Giả định cho DMAG (cần đối chiếu số liệu thật ở giai đoạn 0):
 
-Khi bán cho N phòng khám, mọi điểm yếu của "CDP trong Odoo" bị nhân lên N lần:
+| Nguồn | Giả định | Sự kiện/tháng |
+|------|---------|--------------|
+| Duyệt web/eLearning | 150–300k phiên/tháng × ~20 sự kiện | 3–6 triệu |
+| Theo dõi tiến độ video (heartbeat mỗi 30 giây) | 10k người học × 10 giờ/tháng × 120 nhịp/giờ | ~12 triệu |
+| Nghiệp vụ (đơn, ghi danh, hoàn thành bài, MA, Zalo) | | 0,1–0,5 triệu |
+| **Tổng** | | **~15–20 triệu/tháng, ~200 triệu/năm** |
+| Đỉnh (webinar, mở bán khóa) | 2.000 người online × 1 sự kiện/10 giây | **~200 sự kiện/giây** |
 
-| Vấn đề | Module thuần (cài vào từng Odoo) | Add-on + CDP Core (khuyến nghị) |
-|-------|----------------------------------|----------------------------------|
-| Tích hợp Zalo ZNS, Facebook CAPI/Audiences, TikTok | Mỗi instance tự gọi API, tự xử lý token, rate limit; API đổi thì phải cập nhật N nơi | Làm một lần ở Core, mọi khách dùng chung |
-| Tracking web (event volume) | Ghi vào DB Odoo của phòng khám, làm chậm ERP lễ tân/thu ngân đang dùng | Ghi vào ClickHouse của Core, ERP không bị ảnh hưởng |
-| AI (dự báo no-show, gợi ý điều trị tiếp theo, rời bỏ) | Mỗi phòng khám ít dữ liệu, mô hình yếu; khó triển khai và cập nhật mô hình | Huấn luyện tập trung (trên dữ liệu đã ẩn danh, có thỏa thuận), cập nhật một lần |
-| Nâng cấp & sửa lỗi | Phải nâng cấp module trên N database | Phần lớn logic nằm ở Core, deploy một lần; module mỏng ít thay đổi |
-| Bảo vệ sở hữu trí tuệ | Mã Python của module nằm trên server khách (nếu on-premise), dễ bị sao chép | Lõi giá trị nằm ở Core, không giao mã nguồn |
-| Mô hình doanh thu | Bán license một lần, khó thu theo lượt dùng | Thuê bao theo tháng + tính phí theo tin nhắn/hồ sơ (như IAP) |
-| Trải nghiệm trong Odoo | Tốt | Tốt như nhau: UI vẫn là OWL trong Odoo |
+Nếu đổ lượng này vào Odoo:
+- **Worker**: Odoo xử lý mỗi request bằng một worker, thường cấu hình 9–17 worker. Một request ghi sự kiện qua ORM mất 20–50 ms. Ở mức 200 sự kiện/giây, riêng tracking đã chiếm 4–10 worker, tức **gần nửa server**, tranh chỗ với học viên đang học và đang thanh toán.
+- **Database**: khoảng 200 triệu dòng/năm trong PostgreSQL của Odoo. Backup/restore do Bizapp vận hành chậm dần, vacuum và index nặng, database phình từ vài GB lên hàng trăm GB.
+- **Phân khúc**: truy vấn hành vi trên hàng chục triệu dòng mất từ vài giây đến vài phút trên PostgreSQL row-store. ClickHouse làm cùng việc dưới 1 giây, dữ liệu nén chỉ còn vài GB.
+- **Dental ERP SaaS**: nhiều phòng khám chạy chung server Odoo, nên tải tracking của tất cả cộng dồn lên cùng hạ tầng ERP.
 
-### Hai gói sản phẩm gợi ý
+Ngược lại, phần còn lại trong Odoo rất nhẹ:
+- Outbox nghiệp vụ: vài nghìn dòng/ngày.
+- Bảng hồ sơ CDP: 150k dòng, cập nhật theo lô ban đêm hoặc theo delta.
+- Giao diện gọi API Core khi người dùng mở hồ sơ.
 
-- **CDP Lite** (chạy hoàn toàn trong Odoo, không cần Core): Patient/Customer 360 từ dữ liệu ERP, RFM, danh sách nhắc tái khám, phân khúc cơ bản dùng cho Marketing Automation có sẵn. Dùng làm gói tặng kèm hoặc giá thấp, và là cửa vào để upsell.
-- **CDP Pro** (kết nối CDP Core): tracking web/landing page, hợp nhất danh tính đa kênh, Zalo OA/ZNS, Facebook/TikTok lead + CAPI + Custom Audiences, đo doanh thu theo chiến dịch quảng cáo, AI, trigger real-time.
+### 1.2. Bỏ engine "CDP Lite" chạy trong Odoo
 
-Lite và Pro dùng **cùng một module**, Pro chỉ là bật kết nối Core. Định nghĩa phân khúc lưu cùng một định dạng, để khi khách nâng cấp lên Pro thì không phải làm lại.
+Bản 0.3 đề xuất gói Lite tính toán ngay trong Odoo. **Tôi bỏ phương án này**, vì nó buộc phải duy trì hai engine phân khúc/trait song song (một trong Odoo, một trong Core), gấp đôi chi phí phát triển và kiểm thử.
+
+Thay vào đó, **các gói là cờ tính năng (feature flag) trên Core**:
+
+| Gói | Tính năng |
+|----|----------|
+| **Lite** | Chỉ dữ liệu ERP: hồ sơ 360, RFM/LTV, nhắc tái khám, phân khúc cho Marketing Automation |
+| **Pro** | + tracking web, Zalo OA/ZNS, Facebook/TikTok lead + CAPI + Audiences, đo doanh thu theo quảng cáo, trigger real-time |
+| **AI** | + dự báo no-show, khả năng chấp nhận điều trị, gợi ý khóa/dịch vụ tiếp theo, LLM tạo phân khúc bằng tiếng Việt |
+
+Phí tin nhắn ZNS/SMS tính theo lượt (credit), giống mô hình IAP của Odoo.
+
+Ngoại lệ duy nhất là phòng khám cài on-premise không có internet. Trường hợp này hiếm, nên không thiết kế cho nó ở giai đoạn đầu.
 
 ---
 
 ## 2. CDP "chuẩn concept": 7 năng lực
 
-| # | Năng lực | DMAG (đào tạo) | Phòng khám (Dental ERP) |
-|---|---------|---------------|------------------------|
-| 1 | **Ingestion** | Đơn hàng, ghi danh, tiến độ học, web, Zalo, Facebook | Lịch hẹn, kế hoạch điều trị, thủ thuật đã làm, thanh toán/trả góp, web/landing page, Zalo, Facebook/TikTok lead |
-| 2 | **Identity resolution** | Web vô danh ↔ SĐT ↔ email ↔ Zalo ↔ `res.partner` | Bệnh nhân ↔ người giám hộ/gia đình ↔ lead quảng cáo ↔ Zalo, hợp nhất giữa các chi nhánh |
-| 3 | **Unified profile** | Người học + phòng khám nơi họ làm việc | Bệnh nhân + hộ gia đình |
-| 4 | **Traits & AI** | RFM, CLV, engagement học tập, lead score, gợi ý khóa tiếp theo | LTV bệnh nhân, xác suất no-show, xác suất chấp nhận kế hoạch điều trị, đến hạn tái khám |
+| # | Năng lực | DMAG (eLearning) | Phòng khám (Dental ERP) |
+|---|---------|-----------------|------------------------|
+| 1 | **Ingestion** | Website/eLearning Odoo (SDK), đơn hàng, ghi danh, tiến độ học, chứng chỉ, Zalo, Facebook | Lịch hẹn, kế hoạch điều trị, thủ thuật, thanh toán/trả góp, landing page, Zalo, Facebook/TikTok lead |
+| 2 | **Identity resolution** | Khách vô danh trên web ↔ tài khoản portal ↔ SĐT ↔ email ↔ Zalo ↔ `res.partner` | Bệnh nhân ↔ người thân/hộ gia đình ↔ lead quảng cáo ↔ Zalo; hợp nhất giữa các chi nhánh |
+| 3 | **Unified profile** | Người học + phòng khám nơi làm việc | Bệnh nhân + hộ gia đình |
+| 4 | **Traits & AI** | RFM, CLV, engagement học tập, lead score, khóa gợi ý | LTV, no-show, chấp nhận điều trị, đến hạn tái khám |
 | 5 | **Segmentation** | Động, batch và real-time | Như DMAG |
-| 6 | **Activation** | Marketing Automation của Odoo, ZNS, Facebook CAPI/Audiences, CRM | Như DMAG, cộng thêm nhắc lịch hẹn, nhắc tái khám, khảo sát hài lòng |
-| 7 | **Governance & Privacy** | Luật BVDLCN 91/2025/QH15 | **Dữ liệu sức khỏe là dữ liệu nhạy cảm**: yêu cầu cao hơn (mục 6) |
+| 6 | **Activation** | Marketing Automation (Bizapp), ZNS, Facebook CAPI/Audiences, CRM | Như DMAG, cộng nhắc lịch, tái khám, khảo sát |
+| 7 | **Governance** | Luật BVDLCN 91/2025/QH15 | Thêm yêu cầu cho dữ liệu sức khỏe (nhạy cảm) |
 
 ---
 
-## 3. Kiến trúc
-
-### 3.1. Bộ module Odoo (add-on)
-
-| Module | Vai trò |
-|-------|--------|
-| `cdp_base` | Lõi dùng chung: outbox, gửi sự kiện, đăng ký tenant với Core (API key), cấu hình mapping, model `cdp.segment`, field `x_cdp_*`, chế độ Lite. Không phụ thuộc ngành. |
-| `cdp_dental` | Mapping cho model của Dental ERP (bệnh nhân, lịch hẹn, kế hoạch điều trị, thủ thuật, trả góp), trait và phân khúc mẫu cho nha khoa, tab Patient 360. |
-| `cdp_education` | Mapping cho DMAG (khóa học, ghi danh, tiến độ, chứng chỉ), tab Customer 360. |
-| `cdp_marketing_bridge` | Nối phân khúc/trigger của CDP vào Marketing Automation của Bizapp. Tách riêng vì phụ thuộc module của Bizapp. |
-
-Nguyên tắc: **module mỏng, ít override**, chủ yếu thêm mới. Nhờ vậy khi Dental ERP nâng cấp Odoo 18/19, phần phải migrate là nhỏ.
-
-### 3.2. Đồng bộ Odoo → Core: outbox
-
-- Hook vào method nghiệp vụ (xác nhận lịch hẹn, check-in, hoàn thành thủ thuật, chấp nhận kế hoạch điều trị, thanh toán, ghi danh…). Mỗi sự kiện được ghi vào bảng `cdp_outbox` **trong cùng transaction**: không mất sự kiện, không phát sự kiện của giao dịch bị rollback.
-- Job nền gửi theo lô qua HTTPS, ký HMAC, có retry và idempotency key. Nếu Core gián đoạn, sự kiện xếp hàng trong Odoo, ERP vẫn chạy bình thường.
-- **Backfill** dữ liệu lịch sử khi kích hoạt. **Đối soát hằng đêm** theo `write_date` để bắt thay đổi ngoài ORM.
-- **Không dùng CDC (Debezium) làm cơ chế chính.** Với N database của khách, việc mở replication slot cho từng DB vừa phức tạp, vừa có rủi ro đầy ổ đĩa khi Core dừng lâu.
-
-### 3.3. Đồng bộ Core → Odoo
-
-- Core đẩy theo lô qua API của `cdp_base`: thành viên phân khúc, trait (`x_cdp_*`), lead score, gợi ý.
-- **Một orchestrator cho mỗi kênh**:
-  - Marketing Automation của Odoo: chuỗi chăm sóc email/SMS.
-  - Core: trigger real-time theo hành vi web, Facebook/TikTok, và ZNS nếu MA chưa hỗ trợ Zalo.
-  - Core quản lý **giới hạn tần suất liên lạc** chung để bệnh nhân/khách không bị nhắn dồn dập.
-- Kết quả từ MA (gửi, mở, click, hủy đăng ký) chảy ngược về Core qua outbox.
-
-### 3.4. Giao diện
-
-- **Trong Odoo (OWL)**: tab 360, danh sách phân khúc + builder đơn giản, màn hình kích hoạt (gửi phân khúc sang MA/ZNS/Facebook), dashboard tóm tắt. Đây là nơi 95% người dùng làm việc.
-- **Phân tích nâng cao** (attribution, cohort, funnel): trang web của Core nhúng vào Odoo bằng iframe với SSO token ngắn hạn, để không phải viết UI phức tạp hai lần.
-- **CDP Console** (React): cho đội vận hành DMAG quản lý tenant, gói, quota, giám sát đồng bộ.
-
-### 3.5. CDP Core
+## 3. Kiến trúc chi tiết
 
 ```
- Outbox từ Odoo · JS SDK web/landing · Zalo OA webhook · Facebook/TikTok Lead
-                                  │
-                                  ▼
-          Collector API (FastAPI): xác thực tenant, chuẩn hóa, quota
-                                  │
-                                  ▼
-                 Redpanda (Kafka API), key theo tenant
-                 ┌────────────────┴────────────────┐
-                 ▼                                 ▼
-        Identity service                     ClickHouse (event store)
-   (identity graph theo tenant)              partition theo tenant
-                 └────────────────┬────────────────┘
-                                  ▼  dbt: trait, RFM, LTV, no-show, engagement
-              PostgreSQL: profile, consent, phân khúc, cấu hình (RLS theo tenant)
-                                  │
-                                  ▼
-   Activation: Odoo của tenant · Zalo ZNS · Facebook CAPI/Audiences · TikTok · Webhook
-   Billing/metering: số hồ sơ, số tin ZNS/SMS, số lượt đồng bộ audience
+ ┌──────────── Odoo DMAG / Dental ERP (mỗi tenant) ───────────┐
+ │ Website + eLearning ── JS SDK ─────────────────┐            │
+ │ Nghiệp vụ (ORM) ── cdp_outbox ── job gửi lô ─┐ │            │
+ │ cdp.profile / cdp.segment ◄── API nhận ◄──┐  │ │            │
+ │ Marketing Automation ◄── cdp_marketing_bridge│ │            │
+ └────────────────────────────────────────────┼──┼─┼────────────┘
+                                              │  │ │  HTTPS (HMAC)
+                                              │  ▼ ▼
+ ┌──────────────────────── CDP Core ─────────┼────────────────────┐
+ │ Collector API ─► Redpanda ─► Identity svc ─► PostgreSQL (profile)│
+ │                         └──► ClickHouse (event) ─► dbt traits     │
+ │ Segmentation ─► Activation: Odoo · ZNS · FB/TikTok · Webhook ──┘ │
+ │ Console vận hành · Metering/billing · Cách ly tenant (RLS)       │
+ └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Cách ly tenant** (bắt buộc vì có dữ liệu sức khỏe):
-- `tenant_id` trên mọi bản ghi; PostgreSQL Row-Level Security; mọi truy vấn ClickHouse đều bắt buộc có filter tenant.
-- Khóa mã hóa riêng cho từng tenant với trường nhạy cảm.
-- **Không bao giờ ghép danh tính chéo tenant.** Bệnh nhân của phòng khám A không được xuất hiện trong phân khúc của phòng khám B, kể cả khi trùng SĐT.
-- Khách lớn (chuỗi phòng khám) có thể được tách DB/cluster riêng.
+### 3.1. Bộ module Odoo
 
-### 3.6. Công nghệ
+| Module | Phụ thuộc | Vai trò |
+|-------|----------|--------|
+| `cdp_base` | `base`, `mail`, `website` | Outbox + job gửi, đăng ký tenant/API key, mapping cấu hình được, model `cdp.profile` và `cdp.segment`, API nhận dữ liệu từ Core, gắn JS SDK vào website, widget 360 |
+| `cdp_education` | `cdp_base`, `website_slides`, `website_sale`, `survey` | Sự kiện eLearning (ghi danh, tiến độ, hoàn thành, chứng chỉ), giỏ hàng/đơn khóa học, tab 360 người học |
+| `cdp_dental` | `cdp_base`, các module Dental ERP | Sự kiện lịch hẹn, kế hoạch điều trị, thủ thuật, thanh toán; tab Patient 360 |
+| `cdp_marketing_bridge` | `cdp_base`, module MA của Bizapp | Cho phép chiến dịch MA lọc theo phân khúc CDP và bắt đầu từ trigger CDP; gửi kết quả MA về Core |
 
-| Lớp | Đề xuất |
-|----|--------|
-| Backend Core | Python 3.12 + FastAPI (cùng ngôn ngữ với Odoo) |
-| Hàng đợi | Redpanda |
-| Event store | ClickHouse |
-| Profile/config | PostgreSQL 16 (RLS) |
-| Mô hình hóa | dbt-clickhouse; lập lịch bằng Dagster |
-| Web SDK | Thư viện mã nguồn mở tương thích Segment spec |
-| UI | OWL (trong Odoo), React + TypeScript (Console, analytics nhúng) |
-| AI | LightGBM/scikit-learn (no-show, chấp nhận điều trị, lead score); LLM cho "tạo phân khúc bằng tiếng Việt" và tóm tắt hồ sơ cho lễ tân/tư vấn viên |
-| Hạ tầng | Cloud tại Việt Nam do DMAG làm chủ. Docker Compose khi chỉ có DMAG, Kubernetes khi có từ khoảng 5–10 phòng khám |
+### 3.2. Lưu dữ liệu CDP trong Odoo: model riêng, không ghi vào `res.partner`
 
-Ước tính giai đoạn đầu (DMAG + vài phòng khám pilot): 2–3 máy chủ khoảng 8 vCPU / 32 GB.
+Dữ liệu từ Core lưu vào model riêng `cdp.profile` (quan hệ 1–1 với `res.partner`), **không** thêm cột `x_cdp_*` vào `res.partner`. Lý do:
+- Ghi vào `res.partner` làm đổi `write_date`. Khi đó cơ chế đối soát/outbox coi là partner thay đổi và gửi lại sang Core, tạo **vòng lặp đồng bộ**.
+- Tránh kích hoạt các field compute, rule tự động và tracking chatter mà Bizapp/Dental ERP gắn trên `res.partner`. Cập nhật 150k hồ sơ có thể sinh 150k tin nhắn chatter.
+- Bảng `res.partner` là bảng "nóng" nhất. Ghi hàng loạt dễ gây lock khi lễ tân/sales đang thao tác.
+
+`res.partner` chỉ có field quan hệ (`cdp_profile_id`) và các field `related`/`search` (`cdp_segment_ids`, `cdp_rfm_segment`, `cdp_ltv`…). Nhờ vậy domain filter của Marketing Automation, CRM và báo cáo vẫn dùng được như field bình thường.
+
+### 3.3. Đồng bộ Odoo → Core
+
+- **Outbox trong cùng transaction**: hook vào method nghiệp vụ, ghi `cdp.outbox`. Rollback thì không phát sự kiện; commit thì chắc chắn gửi được.
+- **Job gửi theo lô** (cron mỗi phút, hoặc `queue_job` nếu Bizapp đã dùng): HTTPS + HMAC, retry lũy thừa, idempotency theo `event_id`.
+- **Snapshot thực thể** (`entity.upserted`) cho các model trong mapping, kèm **sự kiện nghiệp vụ** (`order.paid`, `course.completed`…).
+- **Backfill** khi kích hoạt tenant; **đối soát hằng đêm** theo `write_date`.
+- Chi tiết định dạng: [`data-contract-v1.md`](data-contract-v1.md).
+
+### 3.4. Đồng bộ Core → Odoo
+
+- Core gọi API của `cdp_base`, xác thực bằng Odoo API key của một user kỹ thuật + HMAC. Ba loại dữ liệu:
+  - cập nhật hồ sơ/trait theo lô (chỉ phần thay đổi);
+  - thay đổi thành viên phân khúc (thêm/bớt);
+  - trigger real-time.
+- Ghi bằng SQL/ORM theo lô 500–1000 bản ghi, trong context tắt tracking (`tracking_disable`, `mail_notrack`) và không chạm `res.partner`.
+
+### 3.5. Phối hợp với Marketing Automation của Bizapp
+
+MA do Bizapp tự viết mô phỏng bản Enterprise. Bản Enterprise chọn đối tượng chiến dịch bằng **domain filter trên một model** và có các hoạt động/trigger theo thời gian hoặc sự kiện. Nếu MA của Bizapp giữ cấu trúc tương tự, `cdp_marketing_bridge` chỉ cần:
+1. **Đối tượng theo phân khúc**: chiến dịch lọc `res.partner` bằng domain `[('cdp_segment_ids.key', '=', 'checkout_abandoned_24h')]`. MA không phải sửa gì.
+2. **Bắt đầu chiến dịch theo trigger CDP**: thêm loại trigger "Sự kiện CDP". Khi Core báo `trigger.fired`, bridge thêm partner vào chiến dịch tương ứng ngay lập tức, không chờ chu kỳ quét.
+3. **Kết quả MA về Core**: gửi, mở, click, hủy đăng ký, hoàn thành chiến dịch được đưa vào outbox.
+
+**Một orchestrator cho mỗi kênh**:
+- MA của Odoo lo chuỗi email/SMS/ZNS (nếu MA hỗ trợ ZNS).
+- Core lo quảng cáo (Facebook/TikTok) và các trigger real-time mà MA không có.
+- Core quản lý giới hạn tần suất liên lạc chung.
+
+### 3.6. Tracking trên website/eLearning Odoo của DMAG
+
+- `cdp_base` chèn JS SDK vào `web.assets_frontend`. SDK **gửi thẳng tới Core** (domain riêng, ví dụ `t.dmag.vn`), **không** gửi qua Odoo, nên Odoo không chịu tải.
+- Người dùng đã đăng nhập portal: template chèn `partner_id` đã ký (HMAC, có hạn) để SDK gọi `identify`. Lịch sử duyệt web khi còn vô danh được gắn vào hồ sơ.
+- Sự kiện phía client:
+  - xem trang, xem khóa, xem bài học;
+  - phát/tạm dừng/tiến độ video (theo mốc 25/50/75/100% thay vì heartbeat dày, giảm khoảng 10 lần lượng sự kiện);
+  - tìm kiếm, thêm vào giỏ, bắt đầu checkout.
+- Sự kiện phía server (qua outbox, chính xác hơn client):
+  - giỏ hàng (`sale.order` nháp có `website_id`) và thanh toán (`payment.transaction`);
+  - ghi danh (`slide.channel.partner`), hoàn thành bài (`slide.slide.partner`);
+  - chứng chỉ (`survey.user_input` đạt);
+  - đăng ký tài khoản (`res.users` portal).
+- Ghi nhận UTM/fbclid/zclid ở phiên đầu để gán nguồn cho đơn hàng (attribution) và gửi Facebook Conversions API.
+- Có thể tắt tracking lượt xem trang mặc định của Odoo (`website.visitor`/`website.track`) để giảm ghi vào DB Odoo, vì CDP đã đảm nhiệm. Cần thống nhất với Bizapp.
+
+### 3.7. CDP Core
+
+- **Công nghệ**:
+  - FastAPI (Python 3.12), Redpanda, ClickHouse, PostgreSQL 16 (RLS);
+  - dbt-clickhouse, Dagster;
+  - React + TypeScript cho Console, OWL cho UI trong Odoo.
+- **Cách ly tenant**:
+  - `tenant_id` trên mọi bản ghi, PostgreSQL RLS, bắt buộc filter tenant trong ClickHouse;
+  - khóa mã hóa riêng cho từng tenant;
+  - **không ghép danh tính chéo tenant**;
+  - chuỗi phòng khám lớn có thể có cluster riêng.
+- **Hạ tầng giai đoạn đầu**: 2–3 máy chủ khoảng 8 vCPU / 32 GB tại cloud Việt Nam, Docker Compose. Chuyển Kubernetes khi có từ khoảng 5–10 phòng khám.
 
 ---
 
-## 4. Tenant đầu tiên: DMAG (đào tạo)
+## 4. Tenant DMAG: use-case ưu tiên
 
-**Mô hình B2B2C**: phòng khám (account) → nhân sự nha khoa (người học) → khóa học/ghi danh.
-- **Xem theo phòng khám**: "Phòng khám X có 6 người học khóa cơ bản, chưa ai học nâng cao" → chào gói đào tạo doanh nghiệp, và **chào luôn Dental ERP + CDP**. CDP của DMAG trở thành công cụ tìm khách hàng cho chính sản phẩm Dental ERP.
-- Định danh mạnh: tài khoản web = `partner_id`, số chứng chỉ hành nghề (nếu thu thập, có consent), email/SĐT cá nhân. **Không auto-merge theo SĐT phòng khám dùng chung.**
-- Nếu khóa học được công nhận giờ đào tạo liên tục (Luật Khám bệnh, chữa bệnh 2023 yêu cầu cập nhật kiến thức để gia hạn giấy phép hành nghề), CDP có thể theo dõi số giờ tích lũy và nhắc người học. *(Cần xác minh quy định chi tiết.)*
+| # | Use-case | Kích hoạt | KPI |
+|---|---------|----------|-----|
+| 1 | Thu hồi giỏ hàng/checkout bỏ dở | Trigger CDP → MA (ZNS/email) | % đơn thu hồi |
+| 2 | Doanh thu theo chiến dịch Facebook + Conversions API | Dashboard, CAPI | ROAS, CPA thực |
+| 3 | Loại người đã mua khỏi quảng cáo; lookalike từ khách CLV cao | Facebook Custom Audiences | Chi phí quảng cáo lãng phí |
+| 4 | Gợi ý khóa tiếp theo theo lộ trình | MA | Tỷ lệ mua lại |
+| 5 | Kéo người học dở quay lại | MA (ZNS/email) | % hoàn thành khóa |
+| 6 | Lead score cho khóa hands-on giá cao → sales | CRM | Tỷ lệ chốt |
+| 7 | Xem theo phòng khám: nhiều nhân sự đi học → chào gói doanh nghiệp **và Dental ERP** | CRM | Pipeline Dental ERP |
 
-**Tracking plan chính:**
-- Web: `course_viewed`, `added_to_cart`, `checkout_started`, `signed_up`.
-- Thương mại: `order_paid`, `refund_issued`.
-- Học tập: `enrolled`, `lesson_completed`, `course_completed`, `certificate_issued`, `webinar_attended`.
-- Zalo: `oa_followed`, `zns_clicked`.
-- Facebook: `lead_form_submitted`, cùng UTM/fbclid khi vào web.
+MVP: use-case 1–3.
 
-**Use-case ưu tiên cho MVP:**
-1. Thu hồi checkout bỏ dở (ZNS/email qua MA).
-2. Đo doanh thu theo chiến dịch Facebook + gửi Conversions API.
-3. Loại người đã mua khỏi quảng cáo; lookalike từ nhóm CLV cao.
+## 5. Tenant phòng khám: use-case
 
-**Giai đoạn sau:** gợi ý khóa tiếp theo, kéo người học dở quay lại, lead score cho khóa hands-on giá cao, bán gói doanh nghiệp.
+1. Nhắc tái khám định kỳ (cạo vôi 6 tháng, tái khám niềng, bảo hành implant).
+2. Nhắc lịch hẹn + dự báo no-show.
+3. Theo dõi kế hoạch điều trị chưa chốt.
+4. **Đo doanh thu thực theo nguồn quảng cáo** (lead → lịch hẹn → điều trị → thanh toán). Đây là điểm bán hàng mạnh nhất.
+5. Lead quảng cáo vào CRM + chấm điểm + phân cho tư vấn viên.
+6. Kích hoạt lại bệnh nhân lâu không quay lại.
+7. Khảo sát hài lòng/NPS, mời đánh giá Google.
+8. Giới thiệu theo hộ gia đình.
+9. Hợp nhất bệnh nhân giữa các chi nhánh.
 
-## 5. Tenant phòng khám (add-on cho Dental ERP)
-
-**Mô hình dữ liệu**: hộ gia đình → bệnh nhân → lịch hẹn / kế hoạch điều trị / thủ thuật / thanh toán–trả góp; chuỗi phòng khám có nhiều chi nhánh.
-
-**CDP chỉ lấy dữ liệu tối thiểu cần cho marketing/CSKH** (nguyên tắc tối thiểu hóa dữ liệu):
-- Lấy: nhóm thủ thuật (cạo vôi, trám, implant, niềng, tẩy trắng…), ngày, giá trị, trạng thái lịch hẹn và kế hoạch điều trị, chi nhánh, nguồn khách.
-- **Không lấy**: ghi chú lâm sàng, sơ đồ răng chi tiết, phim X-quang, chẩn đoán chi tiết.
-
-| # | Use-case | Giá trị cho phòng khám |
-|---|---------|----------------------|
-| 1 | **Nhắc tái khám định kỳ** (cạo vôi 6 tháng, tái khám niềng, kiểm tra/bảo hành implant) qua ZNS | Doanh thu lặp lại, ít tốn quảng cáo |
-| 2 | **Nhắc lịch hẹn + dự báo no-show** → gọi xác nhận nhóm rủi ro cao | Giảm ghế trống |
-| 3 | **Kế hoạch điều trị chưa chốt** → nhắc tư vấn viên theo dõi, gửi nội dung phù hợp | Tăng tỷ lệ chấp nhận điều trị (nguồn doanh thu lớn nhất bị bỏ sót) |
-| 4 | **Đo doanh thu thực theo nguồn quảng cáo** (Facebook/TikTok/Zalo → lead → lịch hẹn → điều trị → thanh toán) | Phòng khám chi nhiều cho quảng cáo nhưng hiếm khi biết ROAS thật: **đây là điểm bán hàng mạnh nhất** |
-| 5 | **Lead quảng cáo vào thẳng CRM** + chấm điểm + phân cho tư vấn viên, đo thời gian phản hồi | Tăng tỷ lệ chuyển lead → lịch hẹn |
-| 6 | **Kích hoạt lại bệnh nhân lâu không quay lại** | Doanh thu từ tệp khách sẵn có |
-| 7 | **Khảo sát hài lòng/NPS sau điều trị**, mời đánh giá Google | Uy tín, kênh giới thiệu |
-| 8 | **Giới thiệu bạn bè/người thân** (theo hộ gia đình) | Khách mới chi phí thấp |
-| 9 | **Hợp nhất bệnh nhân giữa các chi nhánh** của chuỗi | Hồ sơ không trùng lặp, báo cáo đúng |
-
-**Định giá gợi ý (để thảo luận):**
-- Lite: tặng kèm hoặc giá thấp trong gói Dental ERP.
-- Pro: thuê bao theo chi nhánh/tháng, theo bậc số hồ sơ.
-- Tin nhắn ZNS/SMS: tính theo lượt (mua credit, như IAP), có biên lợi nhuận.
+**Tối thiểu hóa dữ liệu**: CDP chỉ nhận nhóm thủ thuật, ngày, giá trị, trạng thái, chi nhánh, nguồn khách. **Không nhận** ghi chú lâm sàng, sơ đồ răng, phim X-quang, chẩn đoán chi tiết.
 
 ---
 
-## 6. Pháp lý & bảo mật
+## 6. Pháp lý, bản quyền & sở hữu
 
-- Luật Bảo vệ dữ liệu cá nhân **91/2025/QH15** (hiệu lực 01/01/2026). **Dữ liệu sức khỏe của bệnh nhân là dữ liệu cá nhân nhạy cảm.**
-- **Vai trò:** phòng khám là bên kiểm soát dữ liệu, DMAG/CDP Core là bên xử lý dữ liệu. Cần **thỏa thuận xử lý dữ liệu (DPA)** trong hợp đồng với mỗi phòng khám.
-- **Consent tại phòng khám**: form đồng ý trong Dental ERP lúc đăng ký/check-in, theo mục đích (nhắc lịch: chăm sóc; marketing; quảng cáo). Rút đồng ý thì phải dừng trên mọi kênh.
-- **Quảng cáo với dữ liệu sức khỏe**: đẩy danh sách bệnh nhân lên Facebook/TikTok (kể cả đã băm) cần cân nhắc kỹ, vì có thể bị coi là tiết lộ tình trạng điều trị. Hai nền tảng này cũng có chính sách riêng hạn chế dùng dữ liệu sức khỏe nhạy cảm. Mặc định: **chỉ dùng loại trừ (exclusion) và lookalike từ tệp đã đồng ý; không target theo loại điều trị.**
-- Mã hóa, phân quyền, audit log, lưu trữ trong nước, quyền xóa/truy cập. Cần hồ sơ đánh giá tác động cho Core.
-- Dữ liệu tổng hợp dùng huấn luyện AI chung: chỉ dùng dữ liệu đã ẩn danh, và phải ghi rõ trong hợp đồng.
+- **Code thuộc DMAG**: ghi rõ trong hợp đồng với Bizapp. Áp dụng cho CDP Core, các module `cdp_*`, và (nên) cả Dental ERP lẫn Marketing Automation, vì đây là sản phẩm DMAG sẽ bán. Gồm điều khoản chuyển giao mã nguồn, tài liệu và quyền sửa đổi/phân phối.
+- **Marketing Automation "mô phỏng bản Enterprise"**:
+  - Viết lại tính năng tương tự là được. Ý tưởng và tính năng không được bảo hộ bản quyền, chính Odoo Community có nhiều module OCA tương tự Enterprise.
+  - Điều **không được** là sao chép hoặc chỉnh sửa từ mã nguồn, giao diện hay tài nguyên của Odoo Enterprise (giấy phép OEEL).
+  - Đề nghị: đưa vào hợp đồng **cam kết bằng văn bản của Bizapp** rằng module tự viết, không chứa mã Enterprise, kèm điều khoản bồi thường nếu vi phạm.
+- **LGPLv3 của Odoo Community**:
+  - Module riêng của DMAG được phép dùng giấy phép độc quyền.
+  - Nếu Bizapp **sửa trực tiếp mã nguồn lõi Odoo** (không qua module) mà DMAG phân phối cho phòng khám cài on-premise, phải công bố mã của phần sửa đổi đó.
+  - Chạy dạng SaaS thì nghĩa vụ này không phát sinh theo cùng cách. Nên kiểm tra có sửa lõi hay không.
+- **Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15** (hiệu lực 01/01/2026):
+  - Consent theo mục đích; quyền truy cập/xóa/rút đồng ý; lưu trữ trong nước; hồ sơ đánh giá tác động.
+  - Với phòng khám: dữ liệu sức khỏe là **dữ liệu nhạy cảm**. Phòng khám là bên kiểm soát, DMAG là bên xử lý, cần **DPA** với từng phòng khám.
+  - Mặc định không nhắm quảng cáo theo loại điều trị.
 
-> Cần luật sư xác nhận khung pháp lý trước khi bán cho phòng khám đầu tiên.
+> Cần luật sư rà soát hợp đồng với Bizapp và mẫu DPA trước khi bán cho phòng khám đầu tiên.
 
 ---
 
 ## 7. Lộ trình
 
-| Giai đoạn | Thời gian (ước tính) | Phạm vi |
-|----------|-------------------|--------|
-| **0. Khảo sát** | 2 tuần | Với Bizapp: model của Odoo DMAG và Dental ERP, cách MA lọc đối tượng, mô hình triển khai Dental ERP; chốt data contract v1; chốt sở hữu IP |
-| **1. Core + DMAG (MVP)** | 8–10 tuần | `cdp_base` + `cdp_education`, Core multi-tenant (dù mới 1 tenant), web SDK, identity, profile 360, RFM/CLV, phân khúc → MA, Facebook CAPI/Audiences, consent. Use-case DMAG 1–3 |
-| **2. Đa kênh + Lite** | 6–8 tuần | Zalo OA/ZNS, Facebook Lead Ads, lead score → CRM, dashboard attribution, chế độ CDP Lite chạy độc lập trong Odoo |
-| **3. Dental add-on + pilot** | 8–10 tuần | `cdp_dental`, use-case phòng khám 1–5, metering/billing, Console quản lý tenant; pilot 2–3 phòng khám là khách của DMAG |
-| **4. Thương mại hóa** | liên tục | AI (no-show, chấp nhận điều trị), LLM segment builder, use-case 6–9, Kubernetes, quy trình onboarding tự động |
+| Giai đoạn | Thời gian | Phạm vi | Kết quả nghiệm thu |
+|----------|----------|--------|-------------------|
+| **0. Khảo sát** | 2 tuần | Với Bizapp: rà model eLearning/sale/MA thực tế, số liệu traffic, chốt data contract v1, hợp đồng IP | Data contract ký duyệt; số liệu tải thật |
+| **1. MVP DMAG** | 8–10 tuần | Core (multi-tenant, 1 tenant), `cdp_base`, `cdp_education`, `cdp_marketing_bridge`, SDK website, identity, 360, RFM/CLV, phân khúc → MA, Facebook CAPI/Audiences, consent | Use-case DMAG 1–3 chạy production |
+| **2. Đa kênh** | 6–8 tuần | Zalo OA/ZNS, Facebook Lead Ads, lead score → CRM, dashboard attribution, xem theo phòng khám | Use-case DMAG 4–7 |
+| **3. Dental add-on** | 8–10 tuần | `cdp_dental`, use-case phòng khám 1–5, gói Lite/Pro, metering, Console tenant | Pilot 2–3 phòng khám |
+| **4. Thương mại hóa** | liên tục | AI, LLM segment builder, use-case 6–9, Kubernetes, onboarding tự động | Bán đại trà |
 
-**Nhân sự gợi ý:**
+**Nhân sự:**
 - 1 tech lead;
-- 2–3 backend Python (1 người kiêm data/dbt);
+- 2–3 backend Python (1 người kiêm data);
 - 1 frontend (OWL + React);
-- 1 Odoo developer (in-house hoặc Bizapp, theo spec của team CDP);
-- 1 BA/PM có hiểu biết vận hành phòng khám;
+- 1 Odoo developer (in-house hoặc Bizapp theo spec);
+- 1 BA/PM;
 - QA bán thời gian.
 
 ---
@@ -236,31 +250,32 @@ Nguyên tắc: **module mỏng, ít override**, chủ yếu thêm mới. Nhờ v
 
 | Rủi ro | Giảm thiểu |
 |-------|-----------|
-| **Sở hữu trí tuệ Dental ERP & CDP giữa DMAG và Bizapp** | Hợp đồng rõ ràng trước khi code: ai sở hữu module, ai được bán, chia doanh thu. Repo CDP do DMAG làm chủ |
-| **Nguồn gốc các module "như Enterprise" của Bizapp** (vd. Marketing Automation). Nếu port từ mã nguồn Odoo Enterprise (giấy phép OEEL) thì **bán lại cho nhiều phòng khám là rủi ro pháp lý lớn** | Yêu cầu Bizapp xác nhận bằng văn bản là module tự phát triển. CDP chỉ phụ thuộc MA qua module cầu nối `cdp_marketing_bridge` |
-| Dental ERP chưa hoàn thiện khi CDP sẵn sàng | Làm DMAG trước (giai đoạn 1–2). `cdp_dental` dựa trên data contract, phát triển song song với Dental ERP |
-| Rò rỉ dữ liệu chéo tenant | RLS, test tự động cho cách ly tenant, pentest trước khi pilot |
-| Dữ liệu sức khỏe & quảng cáo | Tối thiểu hóa dữ liệu, mặc định không target theo điều trị, DPA với từng phòng khám |
-| Hai hệ thống cùng gửi tin | Một orchestrator mỗi kênh + giới hạn tần suất chung |
-| Phình phạm vi | Đi theo use-case có KPI, mỗi giai đoạn có tiêu chí nghiệm thu |
+| Rủi ro bản quyền từ module "như Enterprise" | Cam kết + bồi thường trong hợp đồng; review mã khi nhận bàn giao |
+| Phụ thuộc Bizapp khi thay đổi Odoo | Data contract có version; module mỏng; DMAG sở hữu code nên có thể chuyển đội phát triển |
+| Vòng lặp đồng bộ / làm nặng `res.partner` | Model `cdp.profile` riêng, tắt tracking khi ghi lô (mục 3.2) |
+| Rò rỉ dữ liệu chéo tenant | RLS, test tự động cách ly tenant, pentest trước pilot |
+| Dữ liệu sức khỏe & quảng cáo | Tối thiểu hóa dữ liệu, DPA, mặc định không target theo điều trị |
+| Gửi tin chồng chéo MA ↔ Core | Một orchestrator mỗi kênh, giới hạn tần suất chung |
+| Ước tính tải sai | Đo số liệu thật ở giai đoạn 0; Core scale ngang được |
 
 ---
 
-## 9. Câu hỏi cần làm rõ
+## 9. Câu hỏi còn mở
 
-1. **Dental ERP triển khai thế nào**: SaaS do DMAG/Bizapp host (multi-database) hay cài on-premise tại phòng khám? Điều này quyết định cách đóng gói add-on và mức bảo vệ IP.
-2. **Sở hữu Dental ERP**: DMAG sở hữu, Bizapp sở hữu, hay đồng sở hữu? CDP do ai phát triển?
-3. Dental ERP đã có những phân hệ nào (lịch hẹn, kế hoạch điều trị, sơ đồ răng, trả góp, kho vật tư, hoa hồng bác sĩ)? Đã có thiết kế dữ liệu chưa?
-4. Web bán khóa học của DMAG là Odoo Website/eLearning hay nền tảng khác?
-5. Marketing Automation của Bizapp hỗ trợ kênh nào (email, SMS, ZNS)? Chọn đối tượng bằng cách nào? Có trigger từ webhook không?
-6. Mục tiêu số phòng khám trong 12–24 tháng (để định cỡ hạ tầng và đội ngũ)?
+1. Dental ERP sẽ chạy **SaaS do DMAG/Bizapp host** hay **on-premise tại phòng khám**? Tài liệu đang giả định SaaS.
+2. Bizapp có dùng `queue_job` (OCA) không? Có sửa trực tiếp mã lõi Odoo không?
+3. MA của Bizapp: chọn đối tượng bằng domain filter? Hỗ trợ kênh nào (email/SMS/ZNS)? Có cơ chế trigger theo sự kiện không?
+4. Video trên eLearning host ở đâu (YouTube, Vimeo, Google Drive, server riêng)? Điều này ảnh hưởng cách theo dõi tiến độ xem.
+5. Cổng thanh toán đang dùng (VNPay, MoMo, chuyển khoản…)?
+6. Số liệu thật: traffic/tháng, số đơn/tháng, số học viên đang học.
 
 ## 10. Bước tiếp theo
 
-1. Chốt câu hỏi 1–2 (mô hình triển khai và IP). Hai câu này ảnh hưởng trực tiếp đến kiến trúc và hợp đồng.
-2. Viết **data contract v1**: định dạng sự kiện outbox, API Core ↔ Odoo, danh mục sự kiện chung + education + dental.
+1. Gửi tài liệu này + [`data-contract-v1.md`](data-contract-v1.md) cho Bizapp, workshop 1 buổi để xác nhận model thực tế.
+2. Bizapp trả lời các câu hỏi mục 9; chốt hợp đồng IP.
 3. Dựng khung repo:
-   - `core/`: FastAPI + PostgreSQL + ClickHouse + Redpanda;
-   - `odoo_addons/`: `cdp_base`, `cdp_education`, `cdp_dental`, `cdp_marketing_bridge`;
-   - `sdk/web/`;
-   - `docs/`.
+   - `core/`;
+   - `odoo_addons/cdp_base`, `cdp_education`, `cdp_marketing_bridge`;
+   - `sdk/web/`.
+
+   Sau đó bắt đầu giai đoạn 1.
