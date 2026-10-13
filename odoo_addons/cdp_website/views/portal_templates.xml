@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="portal_my_home_privacy" inherit_id="portal.portal_my_home" name="CDP privacy entry">
+        <xpath expr="//div[@id='portal_common_category']" position="inside">
+            <t t-call="portal.portal_docs_entry">
+                <t t-set="icon" t-value="'/portal/static/src/img/portal-connection.svg'"/>
+                <t t-set="title">Quyền riêng tư</t>
+                <t t-set="text">Quản lý đồng ý nhận tin, quảng cáo và yêu cầu xóa dữ liệu</t>
+                <t t-set="url" t-value="'/my/privacy'"/>
+                <t t-set="config_card" t-value="True"/>
+            </t>
+        </xpath>
+    </template>
+
+    <template id="portal_my_privacy" name="My Privacy">
+        <t t-call="portal.portal_layout">
+            <t t-set="breadcrumbs_searchbar" t-value="False"/>
+            <h3 class="mt-4">Quyền riêng tư &amp; dữ liệu cá nhân</h3>
+            <div t-if="saved" class="alert alert-success">Đã lưu lựa chọn của bạn.</div>
+            <div t-if="erasure" class="alert alert-info">Đã ghi nhận yêu cầu xóa dữ liệu. Chúng tôi sẽ liên hệ xác minh.</div>
+            <p class="text-muted">
+                Thông báo về đơn hàng, lịch học và thanh toán luôn được gửi để phục vụ bạn.
+                Các mục dưới đây bạn có thể bật/tắt bất cứ lúc nào.
+            </p>
+            <form action="/my/privacy" method="post">
+                <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                <div class="form-check form-switch mb-2" t-foreach="purposes" t-as="purpose">
+                    <input class="form-check-input" type="checkbox" t-att-id="'cdp_' + purpose[0]"
+                           t-att-name="purpose[0]" t-att-checked="decisions.get(purpose[0]) or None"/>
+                    <label class="form-check-label" t-att-for="'cdp_' + purpose[0]" t-out="purpose[1]"/>
+                </div>
+                <button type="submit" class="btn btn-primary mt-2">Lưu lựa chọn</button>
+                <hr/>
+                <button type="submit" name="erasure_request" value="1" class="btn btn-link text-danger p-0"
+                        onclick="return confirm('Gửi yêu cầu xóa dữ liệu cá nhân của bạn?');">
+                    Yêu cầu xóa dữ liệu cá nhân
+                </button>
+            </form>
+        </t>
+    </template>
+</odoo>

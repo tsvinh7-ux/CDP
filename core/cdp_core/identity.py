@@ -13,6 +13,7 @@ Rules (docs/de-xuat-kien-truc-cdp.md §5.5):
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from . import consent
 from .models import Event, Identity, MergeSuggestion, Profile, SegmentMember, utcnow
 
 
@@ -62,6 +63,7 @@ def merge(session: Session, source: Profile, target: Profile):
     # Memberships are recomputed for the target; the source never reached Odoo
     # (it had no partner, or the same partner as the target).
     session.query(SegmentMember).filter(SegmentMember.profile_id == source.id).delete()
+    consent.move(session, source.tenant_id, source.id, target.id)
     source.merged_into = target.id
     source.segment_keys = []
     source.updated_at = utcnow()
@@ -107,6 +109,8 @@ def resolve(
         target = Profile(tenant_id=tenant_id, kind=kind, partner_id=partner_id)
         session.add(target)
         session.flush()
+    if (target.traits or {}).get("erased"):
+        return target  # erased person: never attach new identifiers again
     if partner_id and target.partner_id is None:
         target.partner_id = partner_id
         target.kind = kind
@@ -116,7 +120,7 @@ def resolve(
         owner = found.get(key)
         if owner is None:
             session.add(Identity(tenant_id=tenant_id, kind=key[0], value=key[1], profile_id=target.id))
-        elif owner.id == target.id:
+        elif owner.id == target.id or (owner.traits or {}).get("erased"):
             continue
         elif owner.partner_id is None or owner.partner_id == target.partner_id:
             merge(session, owner, target)

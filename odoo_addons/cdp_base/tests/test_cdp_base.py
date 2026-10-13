@@ -99,6 +99,43 @@ class TestOutbox(CdpCase):
         activity = self.env["mail.activity"].search([("res_model", "=", "res.partner"), ("res_id", "=", partner.id)])
         self.assertIn("Bỏ giỏ hàng", activity.note)
 
+    def test_consent_changes_are_sent(self):
+        partner = self.env["res.partner"].create({"name": "BS. Lan", "email": "lan@example.com"})
+        self.env["cdp.consent"]._set(partner, "ads", True, channel="form", evidence="F-12")
+        self.env["cdp.consent"]._set(partner, "ads", False, channel="phone")
+        rows = self.Outbox.search([("event_type", "=", "consent.updated")], order="id")
+        self.assertEqual([r.payload["properties"]["granted"] for r in rows], [True, False])
+        self.assertEqual(rows[0].payload["properties"]["evidence_ref"], "F-12")
+
+    def test_email_unsubscribe_withdraws_marketing(self):
+        partner = self.env["res.partner"].create({"name": "BS. Lan", "email": "Lan@Example.com"})
+        self.env["mail.blacklist"]._add("lan@example.com")
+        consent = partner.cdp_consent_ids.filtered(lambda c: c.purpose == "marketing")
+        self.assertFalse(consent.granted)
+        self.assertEqual(consent.channel, "email")
+
+    def test_erasure_request_excludes_partner(self):
+        partner = self.env["res.partner"].create({"name": "BS. Lan", "email": "lan@example.com"})
+        self.env["cdp.profile"]._cdp_upsert([{"partner_id": partner.id, "segments": [], "traits": {}}])
+        partner.action_cdp_request_erasure()
+        self.assertTrue(partner.cdp_excluded)
+        self.assertFalse(partner.cdp_profile_ids)
+        self.assertTrue(self.Outbox.search([("event_type", "=", "privacy.erasure_requested")]))
+        # Nothing about this person leaves Odoo any more.
+        self.flush_precommit()
+        before = self.Outbox.search_count([])
+        partner.write({"city": "Huế"})
+        self.Outbox._emit("order.paid", partner)
+        self.flush_precommit()
+        self.assertEqual(self.Outbox.search_count([]), before)
+
+    def test_erased_tombstone_from_core_clears_copy(self):
+        partner = self.env["res.partner"].create({"name": "BS. Lan"})
+        self.env["cdp.profile"]._cdp_upsert([{"partner_id": partner.id, "segments": ["x"], "traits": {}}])
+        self.env["cdp.profile"]._cdp_upsert([{"partner_id": partner.id, "segments": [], "traits": {"erased": True}}])
+        self.assertFalse(partner.cdp_profile_ids)
+        self.assertTrue(partner.cdp_excluded)
+
     def test_phone_normalisation(self):
         self.assertEqual(normalize_phone("84 90 123 4567"), "+84901234567")
         self.assertIsNone(normalize_phone("0000000000"))

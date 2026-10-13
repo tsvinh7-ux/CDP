@@ -8,3 +8,5 @@ access_cdp_trigger_manager,cdp.trigger.log manager,model_cdp_trigger_log,group_c
 access_cdp_outbox_manager,cdp.outbox manager,model_cdp_outbox,group_cdp_manager,1,1,0,1
 access_cdp_mapping_user,cdp.mapping user,model_cdp_mapping,group_cdp_user,1,0,0,0
 access_cdp_mapping_manager,cdp.mapping manager,model_cdp_mapping,group_cdp_manager,1,1,1,1
+access_cdp_consent_user,cdp.consent user,model_cdp_consent,base.group_user,1,1,1,0
+access_cdp_consent_manager,cdp.consent manager,model_cdp_consent,group_cdp_manager,1,1,1,1

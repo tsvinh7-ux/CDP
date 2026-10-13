@@ -125,6 +125,8 @@ class CdpOutbox(models.Model):
             return self.browse()
         if partner is not None and partner and self._is_public_partner(partner):
             return self.browse()  # anonymous website visitor: the web SDK covers them
+        if partner and partner.sudo().cdp_excluded and event_type != "privacy.erasure_requested":
+            return self.browse()  # erasure requested: nothing about this person leaves Odoo
         msg = self._envelope("event", event_type, record, partner, properties)
         return self.sudo().create({
             "event_id": msg["event_id"], "kind": "event", "event_type": event_type,
@@ -146,6 +148,8 @@ class CdpOutbox(models.Model):
                     msg["properties"] = {"merged_into": merged_into[rid]}
                 vals.append(msg)
         else:
+            if model_name == "res.partner":
+                records = records.filtered(lambda p: not p.cdp_excluded)
             for rec in records.exists():
                 msg = self._envelope("entity.upserted", "entity.upserted", rec)
                 msg["properties"] = {

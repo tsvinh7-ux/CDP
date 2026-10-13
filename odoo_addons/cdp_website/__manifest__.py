@@ -5,7 +5,7 @@
     "category": "Marketing",
     "author": "DMAG",
     "license": "OPL-1",
-    "depends": ["cdp_base", "website"],
-    "data": ["views/website_templates.xml"],
+    "depends": ["cdp_base", "website", "portal"],
+    "data": ["views/website_templates.xml", "views/portal_templates.xml"],
     "installable": True,
 }

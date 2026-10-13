@@ -166,3 +166,103 @@ class Activation(Base):
     pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class Consent(Base):
+    """Latest consent decision per purpose (Luật BVDLCN 91/2025/QH15)."""
+
+    __tablename__ = "consents"
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(32), primary_key=True)  # care | marketing | ads | analytics
+    granted: Mapped[bool] = mapped_column(Boolean)
+    channel: Mapped[str | None] = mapped_column(String(32))
+    source: Mapped[str | None] = mapped_column(String(32))  # odoo | web | zalo | admin
+    evidence: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PrivacyRequest(Base):
+    """Audit log of data-subject requests (erasure/export)."""
+
+    __tablename__ = "privacy_requests"
+
+    id: Mapped[int] = mapped_column(BigId, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    profile_id: Mapped[str | None] = mapped_column(String(40))
+    partner_id: Mapped[int | None] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16))  # erase | export
+    source: Mapped[str] = mapped_column(String(32))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    details: Mapped[dict] = mapped_column(JsonType, default=dict)
+
+
+class Destination(Base):
+    """An activation channel configured for a tenant (Facebook, Zalo...)."""
+
+    __tablename__ = "destinations"
+
+    id: Mapped[int] = mapped_column(BigId, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    type: Mapped[str] = mapped_column(String(32))  # facebook_capi | facebook_audience | zalo_zns
+    name: Mapped[str] = mapped_column(String(128))
+    # Non-secret settings in clear; secrets are Fernet-encrypted under "secrets".
+    config: Mapped[dict] = mapped_column(JsonType, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    state: Mapped[dict] = mapped_column(JsonType, default=dict)  # tokens, audience ids...
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AudienceMember(Base):
+    """What we last uploaded to an ads audience, to send only add/remove deltas."""
+
+    __tablename__ = "audience_members"
+
+    destination_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    segment_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    hashed: Mapped[list] = mapped_column(JsonType)  # [sha256(email), sha256(phone)]
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Delivery(Base):
+    """Outbound messages/events to external channels (CAPI event, ZNS message...)."""
+
+    __tablename__ = "deliveries"
+    __table_args__ = (
+        Index("ix_deliveries_pending", "tenant_id", "status"),
+        Index("ix_deliveries_profile_time", "tenant_id", "profile_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigId, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    destination_id: Mapped[int] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(32))  # capi_event | zns | audience_remove
+    profile_id: Mapped[str | None] = mapped_column(String(40))
+    purpose: Mapped[str] = mapped_column(String(32), default="marketing")
+    payload: Mapped[dict] = mapped_column(JsonType, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | sent | skipped | failed
+    reason: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    external_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IngestQueue(Base):
+    """Durable ingest queue (async mode): requests are acknowledged once stored here."""
+
+    __tablename__ = "ingest_queue"
+    __table_args__ = (Index("ix_ingest_queue_pending", "processed_at", "id"),)
+
+    id: Mapped[int] = mapped_column(BigId, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(16))  # odoo | web | zalo
+    payload: Mapped[list] = mapped_column(JsonType)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)

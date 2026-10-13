@@ -142,6 +142,11 @@ class CdpProfile(models.Model):
                 unknown.append(pid)
                 continue
             t = doc.get("traits") or {}
+            if t.get("erased"):
+                # Erased in CDP (from Odoo or from the CDP console): drop the copy, stop syncing.
+                profiles.pop(pid, self.browse()).unlink()
+                self.env["res.partner"].browse(pid).with_context(cdp_no_sync=True).write({"cdp_excluded": True})
+                continue
             vals = {
                 "cdp_id": doc.get("cdp_id"),
                 "kind": doc.get("kind") or "person",

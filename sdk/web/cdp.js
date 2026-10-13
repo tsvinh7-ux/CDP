@@ -41,7 +41,35 @@
     return id;
   }
 
-  var aid = anonymousId();
+  // The anonymous id is an optional (analytics) cookie: created only after consent.
+  var aid = null;
+  function getAid() { return aid || (aid = anonymousId()); }
+
+  function readCookie(name) {
+    var m = d.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  // Odoo website cookie bar: "granted" | "denied" | "pending" (bar shown, no choice yet).
+  function cookieConsent() {
+    if (cfg.respectCookieBar === false || !d.getElementById("cookies-consent-essential")) return "granted";
+    var raw = readCookie("website_cookies_bar");
+    if (!raw) return "pending";
+    try { return JSON.parse(raw).optional ? "granted" : "denied"; } catch (e) { return "pending"; }
+  }
+
+  // Facebook click/browser ids for the Conversions API (server side dedup + matching).
+  function fbIds() {
+    var out = {}, fbp = readCookie("_fbp"), fbc = readCookie("_fbc");
+    var fbclid = new URLSearchParams(w.location.search).get("fbclid");
+    if (!fbc && fbclid) fbc = "fb.1." + Date.now() + "." + fbclid;
+    try {
+      if (fbc) w.localStorage.setItem("_cdp_fbc", fbc); else fbc = w.localStorage.getItem("_cdp_fbc");
+    } catch (e) { /* ignore */ }
+    if (fbp) out.fbp = fbp;
+    if (fbc) out.fbc = fbc;
+    return out;
+  }
 
   function campaign() {
     var out = {}, p = new URLSearchParams(w.location.search);
@@ -56,13 +84,13 @@
       page: { url: w.location.href, path: w.location.pathname, referrer: d.referrer, title: d.title },
       userAgent: w.navigator.userAgent,
       locale: w.navigator.language,
-      library: { name: "dmag-cdp-js", version: "0.1.0" },
+      library: { name: "dmag-cdp-js", version: "0.2.0" },
     };
   }
 
   function enqueue(type, props, event) {
     var msg = {
-      type: type, messageId: uuid(), anonymousId: aid, timestamp: new Date().toISOString(),
+      type: type, messageId: uuid(), timestamp: new Date().toISOString(),
       properties: props || {}, context: context(),
     };
     if (event) msg.event = event;
@@ -75,6 +103,18 @@
   function flush(useBeacon) {
     if (timer) { w.clearTimeout(timer); timer = null; }
     if (!queue.length) return;
+    var consent = cookieConsent();
+    if (consent === "denied") { queue.length = 0; return; }
+    if (consent === "pending") { timer = w.setTimeout(flush, 1000); return; }
+    var id = getAid(), fb = fbIds();
+    try {
+      if (!w.localStorage.getItem("_cdp_cookie_consent") && d.getElementById("cookies-consent-essential")) {
+        w.localStorage.setItem("_cdp_cookie_consent", "1");
+        queue.unshift({ type: "track", event: "Consent Updated", messageId: uuid(), timestamp: new Date().toISOString(),
+                        properties: { purposes: { analytics: true } }, context: context() });
+      }
+    } catch (e) { /* ignore */ }
+    queue.forEach(function (m) { m.anonymousId = id; m.context.fb = fb; if (cfg.userToken) m.userToken = cfg.userToken; });
     var body = JSON.stringify({ writeKey: cfg.writeKey, batch: queue.splice(0, 100) });
     var url = cfg.endpoint.replace(/\/$/, "") + "/v1/collect";
     // text/plain keeps this a "simple" request: no CORS preflight, works with sendBeacon.
@@ -186,6 +226,7 @@
   }
 
   // ------------------------------------------------------------------ boot
+  function boot() {
   api.identify();
   api.page(page.type ? { page_type: page.type } : {});
   if (page.type === "course" && page.course_id) api.track("Course Viewed", lessonProps());
@@ -204,4 +245,7 @@
     flush(true);
   });
   d.addEventListener("visibilitychange", function () { if (d.visibilityState === "hidden") flush(true); });
+  }
+  // The cookie bar is rendered in <body>: wait for the DOM before deciding on consent.
+  if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", boot); else boot();
 })(window, document);

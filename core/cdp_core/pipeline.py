@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import identity, security, segments as seg
+from . import consent, identity, privacy, security, segments as seg
 from .models import Activation, Entity, Event, Profile, Segment, SegmentMember, Tenant, utcnow
 from .normalize import normalize_email, normalize_phone
 from .traits import clinic_summary, compute_account, compute_person, parse_dt
@@ -71,6 +71,8 @@ def refresh_profile(session: Session, tenant: Tenant, profile: Profile, now: dat
     """Recompute traits + segments of a profile (and its clinic if it has one)."""
     now = now or utcnow()
     cfg = tenant.settings or {}
+    if privacy.is_erased(profile):
+        return
     if profile.kind == "account":
         _refresh_account(session, tenant, profile, now)
         return
@@ -84,6 +86,7 @@ def refresh_profile(session: Session, tenant: Tenant, profile: Profile, now: dat
     traits = compute_person(pf, events, now, cfg)
     if profile.partner_id and pf is None and (profile.traits or {}).get("deleted"):
         traits["deleted"] = True
+    traits["consent"] = consent.effective(tenant, consent.explicit(session, tenant.id, profile.id))
 
     old_account = profile.account_partner_id
     profile.account_partner_id = traits.get("clinic_partner_id")
@@ -124,7 +127,8 @@ def _set_traits(profile: Profile, traits: dict, now: datetime):
 
 
 def evaluate_segments(session: Session, tenant: Tenant, profile: Profile, now: datetime):
-    if profile.kind != "person" or profile.merged_into or (profile.traits or {}).get("deleted"):
+    t = profile.traits or {}
+    if profile.kind != "person" or profile.merged_into or t.get("deleted") or t.get("erased"):
         matched: list[str] = []
         active: list[Segment] = []
     else:
@@ -216,6 +220,10 @@ def _apply_odoo(session: Session, tenant: Tenant, msg: dict, ev: Event) -> Profi
         ent.deleted = False
         ent.updated_at = utcnow()
         if obj["model"] == "res.partner":
+            existing = identity.find_by_partner(session, tenant.id, int(obj["id"]))
+            if privacy.is_erased(existing):
+                ent.fields, ent.deleted = {}, True  # keep no personal data of an erased person
+                return None
             kind = "account" if ent.fields.get("is_company") else "person"
             return identity.resolve(session, tenant.id, _partner_identifiers(ent.fields),
                                     partner_id=int(obj["id"]), kind=kind)
@@ -245,6 +253,16 @@ def _apply_odoo(session: Session, tenant: Tenant, msg: dict, ev: Event) -> Profi
         return None
     profile = identity.resolve(session, tenant.id, ids, partner_id=partner_id)
     ev.profile_id = profile.id
+    if privacy.is_erased(profile):
+        session.delete(ev)
+        return None
+    if msg["event_type"] == "consent.updated":
+        consent.record(session, tenant.id, profile.id, props.get("purpose"), bool(props.get("granted")),
+                       channel=props.get("channel"), source="odoo", evidence=props.get("evidence_ref"),
+                       at=parse_dt(msg["occurred_at"]))
+    elif msg["event_type"] == "privacy.erasure_requested":
+        privacy.erase(session, tenant, profile, source="odoo")
+        return None
     return profile
 
 
@@ -278,7 +296,14 @@ def ingest_web_batch(session: Session, tenant: Tenant, batch: list[dict]) -> dic
             result["duplicates"] += 1
             continue
         profile = identity.resolve(session, tenant.id, [("anon", anon)], partner_id=partner_id)
+        if privacy.is_erased(profile):
+            session.delete(ev)
+            continue
         ev.profile_id = profile.id
+        if event_type == "Consent Updated":
+            for purpose, granted in ((item.get("properties") or {}).get("purposes") or {}).items():
+                consent.record(session, tenant.id, profile.id, purpose, bool(granted), channel="web",
+                               source="web", evidence="cookie banner", at=occurred)
         touched[profile.id] = profile
         result["accepted"] += 1
     now = utcnow()

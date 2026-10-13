@@ -6,22 +6,46 @@
         <field name="inherit_id" ref="base.view_partner_form"/>
         <field name="arch" type="xml">
             <xpath expr="//notebook" position="inside">
-                <page string="CDP 360" name="cdp_360" invisible="not cdp_profile_id">
+                <page string="CDP 360" name="cdp_360">
                     <field name="cdp_profile_id" invisible="1"/>
-                    <group>
+                    <field name="cdp_excluded" invisible="1"/>
+                    <div class="alert alert-warning" role="alert" invisible="not cdp_excluded">
+                        Khách đã yêu cầu xóa dữ liệu: không còn đồng bộ sang CDP.
+                    </div>
+                    <div class="text-muted mb-3" invisible="cdp_profile_id or cdp_excluded">
+                        Chưa có dữ liệu CDP cho liên hệ này.
+                    </div>
+                    <div invisible="not cdp_profile_id">
                         <group>
-                            <field name="cdp_segment_ids" widget="many2many_tags" string="Phân khúc"/>
-                            <field name="cdp_rfm_segment"/>
+                            <group>
+                                <field name="cdp_segment_ids" widget="many2many_tags" string="Phân khúc"/>
+                                <field name="cdp_rfm_segment"/>
+                            </group>
+                            <group>
+                                <field name="cdp_total_spent" string="Tổng chi tiêu"/>
+                                <field name="cdp_engagement_score"/>
+                                <field name="cdp_last_seen_at"/>
+                            </group>
                         </group>
-                        <group>
-                            <field name="cdp_total_spent" string="Tổng chi tiêu"/>
-                            <field name="cdp_engagement_score"/>
-                            <field name="cdp_last_seen_at"/>
-                        </group>
-                    </group>
-                    <field name="cdp_summary_html" nolabel="1"/>
-                    <separator string="Hoạt động gần đây (web, học tập, đơn hàng)"/>
-                    <field name="cdp_timeline_html" nolabel="1"/>
+                        <field name="cdp_summary_html" nolabel="1"/>
+                        <separator string="Hoạt động gần đây (web, học tập, đơn hàng)"/>
+                        <field name="cdp_timeline_html" nolabel="1"/>
+                    </div>
+                    <separator string="Đồng ý xử lý dữ liệu cá nhân (Luật 91/2025/QH15)"/>
+                    <field name="cdp_consent_ids" nolabel="1" context="{'default_partner_id': id}">
+                        <tree editable="bottom">
+                            <field name="purpose"/>
+                            <field name="granted" widget="boolean_toggle"/>
+                            <field name="channel"/>
+                            <field name="evidence"/>
+                            <field name="date" readonly="1"/>
+                            <field name="user_id" readonly="1" optional="hide"/>
+                        </tree>
+                    </field>
+                    <button name="action_cdp_request_erasure" type="object" string="Yêu cầu xóa dữ liệu cá nhân (CDP)"
+                            class="btn-link text-danger" icon="fa-user-times" invisible="cdp_excluded"
+                            groups="cdp_base.group_cdp_manager"
+                            confirm="Xóa toàn bộ dữ liệu của khách này trong CDP (sự kiện, định danh, phân khúc) và ngừng đồng bộ? Hóa đơn/chứng từ trong Odoo không bị ảnh hưởng."/>
                 </page>
             </xpath>
         </field>
