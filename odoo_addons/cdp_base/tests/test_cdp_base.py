@@ -136,6 +136,13 @@ class TestOutbox(CdpCase):
         self.assertFalse(partner.cdp_profile_ids)
         self.assertTrue(partner.cdp_excluded)
 
+    def test_internal_users_are_not_customers(self):
+        admin_partner = self.env.ref("base.user_admin").partner_id
+        admin_partner.write({"city": "Hà Nội"})
+        self.flush_precommit()
+        self.assertFalse(self.Outbox.search([("res_model", "=", "res.partner"), ("res_id", "=", admin_partner.id)]))
+        self.assertFalse(self.Outbox._emit("order.paid", admin_partner))
+
     def test_phone_normalisation(self):
         self.assertEqual(normalize_phone("84 90 123 4567"), "+84901234567")
         self.assertIsNone(normalize_phone("0000000000"))

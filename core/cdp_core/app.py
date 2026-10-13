@@ -308,6 +308,10 @@ def list_destinations(tenant: str):
             doc = _dest_doc(d)
             doc["deliveries"] = dict(s.execute(select(Delivery.status, func.count()).where(
                 Delivery.destination_id == d.id).group_by(Delivery.status)).all())
+            if d.type == "facebook_audience":
+                from .models import AudienceMember
+                doc["audience_members"] = s.scalar(select(func.count()).select_from(AudienceMember).where(
+                    AudienceMember.destination_id == d.id))
             out.append(doc)
         return out
 

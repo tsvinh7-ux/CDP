@@ -1,6 +1,6 @@
 # Đề xuất kiến trúc CDP: add-on cho Dental ERP (Odoo 17) và DMAG
 
-> Phiên bản: 0.6 · Ngày: 13/10/2026
+> Phiên bản: 0.7 · Ngày: 13/10/2026
 >
 > Lịch sử thay đổi:
 > - **0.1**: module Odoo hay platform riêng.
@@ -21,6 +21,16 @@
 >   - Video: Google Drive, YouTube, NAS. Thanh toán: VNPay, SePay. Marketing Automation nhắm **chủ phòng khám**.
 >   - Đã dựng **bản khung chạy được** (CDP Core + `cdp_base`/`cdp_website`/`cdp_education` trên Odoo 17), xem [`huong-dan-chay-demo.md`](huong-dan-chay-demo.md).
 
+> - **0.7**: hoàn thiện bản chạy được:
+>   - consent và quyền dữ liệu;
+>   - Facebook CAPI và Custom Audiences, Zalo ZNS và webhook OA;
+>   - hàng đợi (PostgreSQL/Redpanda) và ClickHouse;
+>   - điểm lead, gợi ý khóa học, nha khoa;
+>   - cầu nối Marketing Automation, `cdp_dental`, backfill, đối soát;
+>   - console, Docker.
+>
+>   Xem [`huong-dan-trien-khai.md`](huong-dan-trien-khai.md).
+
 ## 0. Nhật ký quyết định
 
 | # | Quyết định | Ngày |
@@ -34,6 +44,9 @@
 | D7 | Đồng bộ Odoo → Core bằng outbox (không dùng CDC làm cơ chế chính); dữ liệu CDP trong Odoo lưu ở model `cdp.profile` riêng | 13/10/2026 |
 | D8 | Marketing Automation nhắm **chủ phòng khám**. CDP tổng hợp tín hiệu của nhân sự lên cấp phòng khám rồi gắn vào hồ sơ chủ phòng khám (ví dụ "nhân sự đã học Cơ bản, chưa học Nâng cao") | 13/10/2026 |
 | D9 | Video NAS nên phát bằng link file trực tiếp (thẻ `<video>`) để đo được tiến độ xem; Google Drive chỉ đo được mở video và thời gian học | 13/10/2026 |
+| D10 | Hàng đợi ingest mặc định dùng PostgreSQL (đủ cho quy mô DMAG, không thêm hạ tầng); chuyển sang Redpanda bằng cấu hình khi lưu lượng tăng. Sự kiện được xuất sang ClickHouse để lưu dài hạn và phân tích | 13/10/2026 |
+| D11 | Tích hợp Dental ERP bằng quy tắc sự kiện cấu hình được (Automation Rules), không phụ thuộc tên model của Bizapp | 13/10/2026 |
+| D12 | Tin "care" (nhắc thanh toán, lịch hẹn) không cần consent tiếp thị; tin "marketing" cần opt-in và bị giới hạn tần suất chung trên mọi kênh (mặc định 1 tin/ngày, 3 tin/tuần) | 13/10/2026 |
 
 ## 1. Quyết định kiến trúc (đã chốt)
 

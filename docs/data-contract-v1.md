@@ -1,6 +1,6 @@
 # Data Contract v1: Odoo ↔ CDP Core
 
-> Trạng thái: **Bản nháp để Bizapp review** · Ngày: 13/10/2026
+> Trạng thái: **v1, đã cài đặt trong `cdp_base`/CDP Core** (Bizapp review phần mapping và Dental ERP) · Ngày: 13/10/2026
 > Phạm vi: định dạng và giao thức trao đổi dữ liệu giữa các module `cdp_*` trong Odoo 17 và CDP Core.
 > Đi kèm: [`de-xuat-kien-truc-cdp.md`](de-xuat-kien-truc-cdp.md)
 
@@ -169,7 +169,7 @@ Ví dụ:
 ### 4.3. Backfill & đối soát
 
 - **Backfill**: lệnh `cdp_base` "Đồng bộ toàn bộ" sinh `entity.upserted` cho mọi bản ghi trong mapping, đi theo kênh outbox với độ ưu tiên thấp, 1.000 bản ghi/lô.
-- **Đối soát hằng đêm**: Core gọi `GET /cdp/v1/reconcile?model=res.partner&since=...` để nhận danh sách `(id, write_date)` rồi so với dữ liệu đã có. Bản ghi lệch được Core yêu cầu gửi lại bằng `POST /cdp/v1/resync` với danh sách id.
+- **Đối soát hằng đêm** (tự động mỗi 24 giờ): Core gọi `GET /cdp/v1/reconcile?model=res.partner&after_id=<id>&limit=5000` (phân trang theo id) để nhận danh sách `(id, write_date)` rồi so với dữ liệu đã có. Bản ghi lệch được Core yêu cầu gửi lại bằng `POST /cdp/v1/resync` với danh sách id.
 
 ---
 
@@ -192,6 +192,7 @@ Ví dụ:
 | `lead.created` / `lead.stage_changed` | `crm.lead` | `lead_id`, `stage`, `source`, `medium`, `campaign`, `user_id` |
 | `marketing.message_sent` / `opened` / `clicked` / `bounced` / `unsubscribed` | Marketing Automation / mailing | `campaign_id`, `activity_id`, `channel` |
 | `marketing.participant_completed` | Marketing Automation | `campaign_id` |
+| `privacy.erasure_requested` | Nút "Yêu cầu xóa dữ liệu" (`cdp_base`) | `requested_by`. Core xóa dữ liệu, giữ tombstone, gỡ khỏi audience quảng cáo; Odoo đặt `cdp_excluded` |
 
 ### 5.2. Education (`cdp_education`)
 
@@ -215,6 +216,18 @@ Ví dụ:
 | `installment.due` / `paid` / `overdue` | `plan_id`, `amount`, `due_date` |
 | `recall.due` | `service_group`, `due_date` (tính bởi Core hoặc ERP, chốt sau) |
 
+Trong `cdp_dental`, các sự kiện này được khai báo bằng **quy tắc cấu hình** (model, trường trạng thái, giá trị, đường dẫn tới khách hàng, thuộc tính), không cần sửa code Dental ERP. Thuộc tính lâm sàng (`diagnosis`, `note`…) bị chặn.
+
+### 5.3b. Zalo OA (webhook vào Core: `POST /v1/webhooks/zalo/<tenant>`)
+
+| `event_type` | Nguồn | Ghi chú |
+|-------------|------|--------|
+| `zalo.follow` / `zalo.unfollow` | Webhook OA | Định danh `zalo = <oa_id>:<user_id>` |
+| `zalo.user_submit_info` | Khách chia sẻ thông tin với OA | SĐT trong `info.phone` dùng để ghép với partner |
+| `zalo.user_send_text`… | Tin nhắn | Chỉ ghi nhận có tương tác, **không lưu nội dung** |
+
+Chữ ký: `X-ZEvent-Signature: mac=sha256(app_id + body + timestamp + oa_secret_key)`.
+
 ### 5.4. Web SDK (gửi thẳng tới Core, không qua Odoo)
 
 Theo cấu trúc Segment spec: `page`, `track`, `identify`.
@@ -226,6 +239,7 @@ Theo cấu trúc Segment spec: `page`, `track`, `identify`.
 | `Lesson Viewed` | `course_id`, `lesson_id` |
 | `Video Opened` | `lesson_id`, `provider` (`youtube`, `html5`, `gdrive`) |
 | `Video Progress` | `lesson_id`, `milestone` (25/50/75/100), `provider`. Chỉ có với YouTube và video HTML5 (NAS link trực tiếp); Google Drive không có API player |
+| `Consent Updated` | `purposes` (ví dụ `{"analytics": true}`): khi khách chấp nhận cookie tùy chọn |
 | `Lesson Time Spent` | `lesson_id`, `seconds` (gửi khi rời trang; dùng thay tiến độ cho video Google Drive) |
 | `Products Searched` | `query` |
 | `Product Added` | `product_id`, `course_id`, `price` |

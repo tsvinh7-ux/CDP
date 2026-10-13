@@ -59,8 +59,8 @@ class TestMarketingBridge(TransactionCase):
         self.assertEqual(activity.summary, "Gọi chủ PK")
 
     def test_ma_adapter_reports_missing_model(self):
-        rule = self.env["cdp.trigger.rule"].create({"segment_id": self.segment.id, "action": "ma_campaign",
-                                                    "ma_campaign_id": 7, "ma_participant_model": "x.not.installed"})
+        self.env["cdp.trigger.rule"].create({"segment_id": self.segment.id, "action": "ma_campaign",
+                                             "ma_campaign_id": 7, "ma_participant_model": "x.not.installed"})
         log = self.env["cdp.trigger.log"].create({"trigger_id": "t3", "key": "owners_basic",
                                                   "segment_id": self.segment.id, "partner_id": self.owner.id})
         log._dispatch()

@@ -6,6 +6,7 @@ Each destination type:
 Deliveries are durable, so a provider outage only delays sending.
 """
 
+import copy
 import hashlib
 import logging
 from datetime import timedelta
@@ -54,7 +55,8 @@ class Handler:
         return secrets.decrypt((self.cfg.get("secrets") or {}).get(name))
 
     def set_state(self, **values):
-        self.dest.state = {**(self.dest.state or {}), **values}
+        # Deep copy: JSON columns only detect re-assignment, and callers keep mutating their dicts.
+        self.dest.state = copy.deepcopy({**(self.dest.state or {}), **values})
 
     def profile(self, profile_id: str | None) -> Profile | None:
         return self.session.get(Profile, profile_id) if profile_id else None

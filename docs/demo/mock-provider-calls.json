@@ -1,0 +1,387 @@
+[
+  {
+    "at": "10:54:41",
+    "provider": "facebook_capi",
+    "method": "POST",
+    "path": "/graph/v21.0/PX_DMAG/events",
+    "body": {
+      "data": [
+        {
+          "event_id": "829b14f1-e5ce-4f9d-a7f3-7b956ca0820c",
+          "event_name": "InitiateCheckout",
+          "event_time": 1791888873,
+          "custom_data": {
+            "value": 4025000.0,
+            "currency": "VND",
+            "content_ids": [
+              "3"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "user_data": {
+            "external_id": [
+              "73441a23c68d6920f293402906c96199dee5d32558cd25e0f93da734131dd1ba"
+            ],
+            "em": [
+              "91bc3ee6ec68e9dd1f715e005771025335f8acbbcf4653a78cecc68a5be4dea0"
+            ],
+            "ph": [
+              "a200faa0581858b82a82e4b1ff550dd17ccc0e53246ed92f06723e25d507ac95"
+            ]
+          }
+        },
+        {
+          "event_id": "153145dc-bf85-4f29-b2cc-7a1b7279e22b",
+          "event_name": "Purchase",
+          "event_time": 1791888873,
+          "custom_data": {
+            "value": 4025000.0,
+            "currency": "VND",
+            "content_ids": [
+              "3"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "user_data": {
+            "external_id": [
+              "73441a23c68d6920f293402906c96199dee5d32558cd25e0f93da734131dd1ba"
+            ],
+            "em": [
+              "91bc3ee6ec68e9dd1f715e005771025335f8acbbcf4653a78cecc68a5be4dea0"
+            ],
+            "ph": [
+              "a200faa0581858b82a82e4b1ff550dd17ccc0e53246ed92f06723e25d507ac95"
+            ]
+          }
+        },
+        {
+          "event_id": "558e2d27-bf9c-445d-bf0c-0945d740888e",
+          "event_name": "InitiateCheckout",
+          "event_time": 1791888873,
+          "custom_data": {
+            "value": 13800000.0,
+            "currency": "VND",
+            "content_ids": [
+              "4"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "user_data": {
+            "external_id": [
+              "73441a23c68d6920f293402906c96199dee5d32558cd25e0f93da734131dd1ba"
+            ],
+            "em": [
+              "91bc3ee6ec68e9dd1f715e005771025335f8acbbcf4653a78cecc68a5be4dea0"
+            ],
+            "ph": [
+              "a200faa0581858b82a82e4b1ff550dd17ccc0e53246ed92f06723e25d507ac95"
+            ]
+          }
+        },
+        {
+          "event_id": "94595c78-407c-4f47-8ff3-112224a904a5",
+          "event_name": "Purchase",
+          "event_time": 1791888873,
+          "custom_data": {
+            "value": 13800000.0,
+            "currency": "VND",
+            "content_ids": [
+              "4"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "user_data": {
+            "external_id": [
+              "73441a23c68d6920f293402906c96199dee5d32558cd25e0f93da734131dd1ba"
+            ],
+            "em": [
+              "91bc3ee6ec68e9dd1f715e005771025335f8acbbcf4653a78cecc68a5be4dea0"
+            ],
+            "ph": [
+              "a200faa0581858b82a82e4b1ff550dd17ccc0e53246ed92f06723e25d507ac95"
+            ]
+          }
+        }
+      ],
+      "access_token": "***"
+    }
+  },
+  {
+    "at": "10:54:41",
+    "provider": "facebook_audience",
+    "method": "POST",
+    "path": "/graph/v21.0/act_DMAG/customaudiences",
+    "body": {
+      "name": "DMAG CDP - Chủ phòng khám",
+      "subtype": "CUSTOM",
+      "customer_file_source": "USER_PROVIDED_ONLY",
+      "description": "CDP segment clinic_owners, synced automatically",
+      "access_token": "***"
+    }
+  },
+  {
+    "at": "10:54:41",
+    "provider": "facebook_audience",
+    "method": "POST",
+    "path": "/graph/v21.0/mock_audience_1/users",
+    "body": {
+      "payload": {
+        "schema": [
+          "EMAIL",
+          "PHONE"
+        ],
+        "data": [
+          [
+            "9f57af8e1c300589e0772c1c441db442aa4d99e0c495d3455bc995174453575b",
+            "013192da625b6c19eb235412895ce70c499a38e83fb382c7f34e6785d21c354f"
+          ]
+        ]
+      },
+      "access_token": "***"
+    }
+  },
+  {
+    "at": "10:54:41",
+    "provider": "facebook_audience",
+    "method": "POST",
+    "path": "/graph/v21.0/act_DMAG/customaudiences",
+    "body": {
+      "name": "DMAG CDP - Chi tiêu ≥ 10 triệu",
+      "subtype": "CUSTOM",
+      "customer_file_source": "USER_PROVIDED_ONLY",
+      "description": "CDP segment high_value, synced automatically",
+      "access_token": "***"
+    }
+  },
+  {
+    "at": "10:54:41",
+    "provider": "facebook_audience",
+    "method": "POST",
+    "path": "/graph/v21.0/mock_audience_2/users",
+    "body": {
+      "payload": {
+        "schema": [
+          "EMAIL",
+          "PHONE"
+        ],
+        "data": [
+          [
+            "91bc3ee6ec68e9dd1f715e005771025335f8acbbcf4653a78cecc68a5be4dea0",
+            "a200faa0581858b82a82e4b1ff550dd17ccc0e53246ed92f06723e25d507ac95"
+          ]
+        ]
+      },
+      "access_token": "***"
+    }
+  },
+  {
+    "at": "10:54:41",
+    "provider": "zalo_oauth",
+    "method": "POST",
+    "path": "/zalo/oauth",
+    "body": {
+      "refresh_token": "***",
+      "app_id": "APP_DMAG",
+      "grant_type": "refresh_token"
+    }
+  },
+  {
+    "at": "10:54:41",
+    "provider": "zalo_zns",
+    "method": "POST",
+    "path": "/zalo/zns",
+    "body": {
+      "phone": "84901111111",
+      "template_id": "ZNS_OWNER_ADV",
+      "template_data": {
+        "ten_khach": "BS. Trần Minh",
+        "khoa_goi_y": "Implant Nâng cao",
+        "phong_kham": "Nha khoa An Phúc"
+      },
+      "tracking_id": "cdp-11",
+      "mode": "development"
+    }
+  },
+  {
+    "at": "10:55:18",
+    "provider": "facebook_capi",
+    "method": "POST",
+    "path": "/graph/v21.0/PX_DMAG/events",
+    "body": {
+      "data": [
+        {
+          "event_id": "19cdcfcb-8084-465b-a358-4454d7337b46",
+          "event_name": "ViewContent",
+          "event_time": 1791888889,
+          "custom_data": {
+            "content_ids": [
+              "course_2"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "event_source_url": "http://localhost:8069/slides/2?utm_source=facebook&utm_medium=cpc&utm_campaign=implant_nang_cao_t10",
+          "user_data": {
+            "external_id": [
+              "d8ae6011282c8f5444b3c929e8443ab91c38fad8e1307ebc9ec0a48121ecf19f"
+            ],
+            "em": [
+              "9f57af8e1c300589e0772c1c441db442aa4d99e0c495d3455bc995174453575b"
+            ],
+            "ph": [
+              "013192da625b6c19eb235412895ce70c499a38e83fb382c7f34e6785d21c354f"
+            ],
+            "client_user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.7390.37 Safari/537.36"
+          }
+        },
+        {
+          "event_id": "bcdfa7e3-26dc-417f-93d2-d769fc4e9b89",
+          "event_name": "ViewContent",
+          "event_time": 1791888892,
+          "custom_data": {
+            "content_ids": [
+              "course_2"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "event_source_url": "http://localhost:8069/slides/2",
+          "user_data": {
+            "external_id": [
+              "d8ae6011282c8f5444b3c929e8443ab91c38fad8e1307ebc9ec0a48121ecf19f"
+            ],
+            "em": [
+              "9f57af8e1c300589e0772c1c441db442aa4d99e0c495d3455bc995174453575b"
+            ],
+            "ph": [
+              "013192da625b6c19eb235412895ce70c499a38e83fb382c7f34e6785d21c354f"
+            ],
+            "client_user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.7390.37 Safari/537.36"
+          }
+        },
+        {
+          "event_id": "7b1b31a5-21be-43e7-9fe9-db415d12e0c4",
+          "event_name": "ViewContent",
+          "event_time": 1791888894,
+          "custom_data": {
+            "content_ids": [
+              "course_2"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "event_source_url": "http://localhost:8069/slides/2",
+          "user_data": {
+            "external_id": [
+              "d8ae6011282c8f5444b3c929e8443ab91c38fad8e1307ebc9ec0a48121ecf19f"
+            ],
+            "em": [
+              "9f57af8e1c300589e0772c1c441db442aa4d99e0c495d3455bc995174453575b"
+            ],
+            "ph": [
+              "013192da625b6c19eb235412895ce70c499a38e83fb382c7f34e6785d21c354f"
+            ],
+            "client_user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.7390.37 Safari/537.36"
+          }
+        },
+        {
+          "event_id": "32b6fff8-8407-45d4-b893-d031898c9e18",
+          "event_name": "ViewContent",
+          "event_time": 1791888897,
+          "custom_data": {
+            "content_ids": [
+              "course_1"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "event_source_url": "http://localhost:8069/slides/1",
+          "user_data": {
+            "external_id": [
+              "d8ae6011282c8f5444b3c929e8443ab91c38fad8e1307ebc9ec0a48121ecf19f"
+            ],
+            "em": [
+              "9f57af8e1c300589e0772c1c441db442aa4d99e0c495d3455bc995174453575b"
+            ],
+            "ph": [
+              "013192da625b6c19eb235412895ce70c499a38e83fb382c7f34e6785d21c354f"
+            ],
+            "client_user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.7390.37 Safari/537.36"
+          }
+        },
+        {
+          "event_id": "f81ee2a1-c56a-4615-9ce0-c89edc6f9d3a",
+          "event_name": "ViewContent",
+          "event_time": 1791888903,
+          "custom_data": {
+            "content_ids": [
+              "course_2"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "event_source_url": "http://localhost:8069/slides/2",
+          "user_data": {
+            "external_id": [
+              "d8ae6011282c8f5444b3c929e8443ab91c38fad8e1307ebc9ec0a48121ecf19f"
+            ],
+            "em": [
+              "9f57af8e1c300589e0772c1c441db442aa4d99e0c495d3455bc995174453575b"
+            ],
+            "ph": [
+              "013192da625b6c19eb235412895ce70c499a38e83fb382c7f34e6785d21c354f"
+            ],
+            "client_user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.7390.37 Safari/537.36"
+          }
+        },
+        {
+          "event_id": "50bdf51d-8937-469f-aa06-e5aae40aabaa",
+          "event_name": "AddToCart",
+          "event_time": 1791888906,
+          "custom_data": {
+            "value": 13800000.0,
+            "currency": "VND",
+            "content_ids": [
+              "4"
+            ],
+            "content_type": "product"
+          },
+          "action_source": "website",
+          "user_data": {
+            "external_id": [
+              "d8ae6011282c8f5444b3c929e8443ab91c38fad8e1307ebc9ec0a48121ecf19f"
+            ],
+            "em": [
+              "9f57af8e1c300589e0772c1c441db442aa4d99e0c495d3455bc995174453575b"
+            ],
+            "ph": [
+              "013192da625b6c19eb235412895ce70c499a38e83fb382c7f34e6785d21c354f"
+            ]
+          }
+        }
+      ],
+      "access_token": "***"
+    }
+  },
+  {
+    "at": "10:56:32",
+    "provider": "zalo_zns",
+    "method": "POST",
+    "path": "/zalo/zns",
+    "body": {
+      "phone": "84911444444",
+      "template_id": "ZNS_PAYMENT",
+      "template_data": {
+        "ma_don": "S00007",
+        "so_tien": 13800000,
+        "ten_khach": "BS. Nguyễn Hòa"
+      },
+      "tracking_id": "cdp-19",
+      "mode": "development"
+    }
+  }
+]

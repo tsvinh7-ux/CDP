@@ -46,7 +46,8 @@
   textarea { width:100%; min-height:110px; font-family: ui-monospace, monospace; font-size:12px; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
   .row > label { min-width:110px; color:var(--muted); }
-  .cond { display:grid; grid-template-columns: 2fr 1.2fr 1.2fr auto; gap:6px; margin-bottom:6px; }
+  .cond { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1.2fr) minmax(0,1.2fr) auto; gap:6px; margin-bottom:6px; }
+  .cond select, .cond input { width:100%; min-width:0; }
   .bar { height:8px; background:var(--accent); border-radius:4px; }
   .notice { padding:8px 12px; border-radius:6px; background:#ecfdf3; color:var(--ok); margin-top:8px; display:none; }
   @media (max-width: 900px) { .tab.active { grid-template-columns: 1fr; } main { padding:16px; } .cond { grid-template-columns: 1fr; } }
@@ -190,7 +191,9 @@ async function load() {
     evs.map(e => `<tr><td>${time(e.occurred_at)}</td><td><span class="src ${e.source}">${e.source}</span></td><td>${esc(e.type)}<br><span class="muted">${esc(JSON.stringify(e.properties || {}).slice(0, 90))}</span></td></tr>`).join('');
   $('dests').innerHTML = '<tr><th>Kênh</th><th>Loại</th><th>Trạng thái</th><th>Đã gửi / bỏ qua / lỗi</th><th>Lỗi gần nhất</th></tr>' +
     (dests.length ? dests.map(d => `<tr><td>${esc(d.name)}</td><td>${esc(d.type)}</td><td>${d.enabled ? '<span class="tag ok">bật</span>' : '<span class="tag bad">tắt</span>'}</td>
-      <td>${d.deliveries.sent || 0} / ${d.deliveries.skipped || 0} / ${(d.deliveries.failed || 0)}</td><td class="muted">${esc(d.last_error || '')}</td></tr>`).join('')
+      <td>${d.type === 'facebook_audience'
+        ? `${Object.keys((d.state || {}).audiences || {}).length} audience · ${d.audience_members || 0} người đang đồng bộ`
+        : `${d.deliveries.sent || 0} / ${d.deliveries.skipped || 0} / ${(d.deliveries.failed || 0)}`}</td><td class="muted">${esc(d.last_error || '')}</td></tr>`).join('')
       : '<tr><td colspan="5" class="muted">Chưa cấu hình kênh nào.</td></tr>');
   $('deliveries').innerHTML = '<tr><th>#</th><th>Loại</th><th>Mục đích</th><th>Trạng thái</th></tr>' +
     dels.map(d => `<tr><td>${d.id}</td><td>${esc(d.kind)}</td><td>${esc(d.purpose)}</td><td>${esc(d.status)} <span class="muted">${esc(d.reason || '')}</span></td></tr>`).join('');

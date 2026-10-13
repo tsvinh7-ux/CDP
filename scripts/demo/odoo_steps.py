@@ -86,9 +86,16 @@ def seed():
     # Receptionist registered with the owner's phone: must NOT be merged with him.
     person("Lễ tân An Phúc", an_phuc, "other", "letan@anphuc.vn", "0901111111")
 
+    # Consent collected on the registration form (Luật 91/2025): Minh accepts marketing + ads.
+    Consent = env["cdp.consent"]
+    Consent._set(minh, "marketing", True, channel="form", evidence="Phiếu đăng ký lớp Implant 09/2026")
+    Consent._set(minh, "ads", True, channel="form", evidence="Phiếu đăng ký lớp Implant 09/2026")
+    Consent._set(thu, "marketing", True, channel="website", evidence="Checkbox khi mua khóa")
+
     hoa_binh = clinic("Nha khoa Hòa Bình", "Hà Nội", "024 3999 8888")
     hoa = person("BS. Nguyễn Hòa", hoa_binh, "clinic_owner", "hoa@hoabinh.vn", "0911 444 444")
     lan = person("BS. Đỗ Lan", hoa_binh, "dentist", "lan@hoabinh.vn", "0912 555 555")
+    Consent._set(lan, "ads", True, channel="form", evidence="Phiếu khảo sát hội thảo")
 
     def paid_order(partner, channel, provider):
         order = env["sale.order"].create({
@@ -153,12 +160,33 @@ def sepay_order():
     print("SEPAY ORDER", order.name, order.amount_total)
 
 
+def rules():
+    """Marketing bridge: what Odoo does when CDP reports segment entries (owners first)."""
+    Segment = env["cdp.segment"]
+    hot = Segment.search([("key", "=", "hot_leads")])
+    owners = Segment.search([("key", "=", "owner_staff_basic_no_advanced")])
+    hot_list = env["mailing.list"].create({"name": "CDP – Quan tâm cao"})
+    owner_list = env["mailing.list"].create({"name": "CDP – Chủ PK: mời Implant Nâng cao cho đội ngũ"})
+    owners.mailing_list_id = owner_list
+    env["cdp.trigger.rule"].create([
+        {"segment_id": hot.id, "action": "activity", "activity_summary": "Gọi tư vấn khóa khách đang quan tâm"},
+        {"segment_id": hot.id, "action": "mailing_list", "mailing_list_id": hot_list.id},
+        {"segment_id": owners.id, "action": "activity", "only_role": "clinic_owner",
+         "activity_summary": "Chào gói Implant Nâng cao cho đội ngũ phòng khám"},
+    ])
+    owners._sync_mailing_list()
+    env.cr.commit()
+    print("RULES OK", {"owner_list": owner_list.contact_count, "hot_list": hot_list.id})
+
+
 def report():
     for p in env["res.partner"].search([("cdp_profile_ids", "!=", False)], order="id"):
         print(f"{p.name:<22} segments={p.cdp_segment_ids.mapped('key')} rfm={p.cdp_rfm_segment} "
               f"spent={p.cdp_total_spent:,.0f}")
     for t in env["cdp.trigger.log"].search([], order="id"):
         print(f"TRIGGER {t.key:<32} → {t.partner_id.name:<16} {t.state} {t.result}")
+    for ml in env["mailing.list"].search([("name", "like", "CDP –")]):
+        print(f"MAILING LIST {ml.name}: {', '.join(ml.contact_ids.mapped('email'))}")
 
 
-{"seed": seed, "send": send, "sepay_order": sepay_order, "report": report}[step]()
+{"seed": seed, "send": send, "sepay_order": sepay_order, "rules": rules, "report": report}[step]()

@@ -183,3 +183,18 @@ def test_zalo_webhook_links_zalo_user_to_partner(session, tenant):
     kinds = {i.kind for i in session.scalars(select(Identity).where(Identity.profile_id == owner.id))}
     assert "zalo" in kinds
     assert owner.traits["zalo_follower"] is True
+
+
+def test_audience_ids_persist_across_runs(session, tenant):
+    """Regression: the 2nd audience id was lost (in-place dict mutation not detected), recreated each run."""
+    seed(session, tenant)
+    ingest_odoo_batch(session, tenant, [msg(event_type="order.paid", subject={"model": "res.partner", "id": OWNER},
+                                            properties={"order_id": 1, "amount": 20000000})])
+    destinations.create(session, tenant.id, "facebook_audience", "Ads", {
+        "ad_account_id": "act_9", "segments": ["clinic_owners", "high_value"]}, {"access_token": "tok"})
+    destinations.run(session, tenant, FakeApi().client())
+    session.commit()
+    session.expire_all()
+    api = FakeApi()
+    destinations.run(session, tenant, api.client())
+    assert api.find("/customaudiences") == []

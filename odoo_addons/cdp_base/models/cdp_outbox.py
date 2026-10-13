@@ -73,6 +73,13 @@ class CdpOutbox(models.Model):
     # ------------------------------------------------------------------ enqueue
 
     @api.model
+    def _is_internal_partner(self, partner):
+        """Employees are not customers: excluded unless cdp.include_internal_users is set."""
+        if self.env["ir.config_parameter"].sudo().get_param("cdp.include_internal_users") in ("1", "True", "true"):
+            return False
+        return any(not u.share for u in partner.sudo().with_context(active_test=False).user_ids)
+
+    @api.model
     def _is_public_partner(self, partner):
         users = partner.sudo().with_context(active_test=False).user_ids
         return bool(users) and all(u._is_public() for u in users)
@@ -132,6 +139,8 @@ class CdpOutbox(models.Model):
             return self.browse()  # anonymous website visitor: the web SDK covers them
         if partner and partner.sudo().cdp_excluded and event_type != "privacy.erasure_requested":
             return self.browse()  # erasure requested: nothing about this person leaves Odoo
+        if partner and self._is_internal_partner(partner):
+            return self.browse()
         msg = self._envelope("event", event_type, record, partner, properties, occurred_at, event_id)
         return self.sudo().create({
             "event_id": msg["event_id"], "kind": "event", "event_type": event_type,
@@ -154,7 +163,7 @@ class CdpOutbox(models.Model):
                 vals.append(msg)
         else:
             if model_name == "res.partner":
-                records = records.filtered(lambda p: not p.cdp_excluded)
+                records = records.filtered(lambda p: not p.cdp_excluded and not self._is_internal_partner(p))
             for rec in records.exists():
                 msg = self._envelope("entity.upserted", "entity.upserted", rec)
                 msg["properties"] = {

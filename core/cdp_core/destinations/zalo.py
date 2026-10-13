@@ -68,7 +68,7 @@ class ZaloZns(Handler):
         if state.get("access_token") and expires and expires > utcnow() + timedelta(minutes=5):
             return secrets.decrypt(state["access_token"])
         refresh = secrets.decrypt(state.get("refresh_token")) or self.secret("refresh_token")
-        resp = self.client.post(OAUTH_URL, headers={"secret_key": self.secret("secret_key") or ""},
+        resp = self.client.post(self.cfg.get("oauth_url", OAUTH_URL), headers={"secret_key": self.secret("secret_key") or ""},
                                 data={"refresh_token": refresh, "app_id": self.cfg.get("app_id"),
                                       "grant_type": "refresh_token"}, timeout=30)
         body = resp.json()
@@ -130,7 +130,8 @@ class ZaloZns(Handler):
             if self.cfg.get("mode"):
                 body["mode"] = self.cfg["mode"]
             token = token or self.access_token()
-            resp = self.client.post(ZNS_URL, headers={"access_token": token}, json=body, timeout=30)
+            resp = self.client.post(self.cfg.get("zns_url", ZNS_URL), headers={"access_token": token}, json=body,
+                                    timeout=30)
             result = resp.json() if resp.content else {}
             code = result.get("error")
             if code == 0:
