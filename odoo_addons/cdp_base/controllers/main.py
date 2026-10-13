@@ -110,18 +110,22 @@ class CdpController(http.Controller):
         return _json({"status": log.state, "result": log.result})
 
     @http.route("/cdp/v1/reconcile", type="http", auth="public", methods=["GET"], csrf=False, save_session=False)
-    def reconcile(self, model=None, since=None, limit=5000):
-        """(id, write_date) of mapped records, for nightly reconciliation (§4.3)."""
+    def reconcile(self, model=None, since=None, after_id=0, limit=5000):
+        """(id, write_date) of mapped records, for nightly reconciliation (§4.3), paginated by id."""
         _data, error = self._authenticate()
         if error:
             return error
         env = request.env(su=True)
         if not model or not env["cdp.mapping"]._get_fields(model):
             return _json({"error": "model not mapped"}, 400)
-        domain = [("write_date", ">=", since)] if since else []
+        domain = [("id", ">", int(after_id or 0))]
+        if since:
+            domain.append(("write_date", ">=", since))
+        if model == "res.partner":
+            domain.append(("cdp_excluded", "=", False))
         rows = env[model].with_context(active_test=False).search_read(
             domain, ["write_date"], order="id", limit=min(int(limit), 50000))
-        return _json({"model": model, "records": [[r["id"], r["write_date"]] for r in rows]})
+        return _json({"model": model, "records": [[r["id"], r["write_date"].isoformat() + "Z"] for r in rows]})
 
     @http.route("/cdp/v1/resync", type="http", auth="public", methods=["POST"], csrf=False, save_session=False)
     def resync(self):

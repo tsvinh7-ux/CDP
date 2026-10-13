@@ -233,7 +233,7 @@ def _apply_odoo(session: Session, tenant: Tenant, msg: dict, ev: Event) -> Profi
             session.add(ent)
         elif seq and ent.seq and seq < ent.seq:
             return None  # out-of-order older snapshot
-        ent.fields = props.get("fields") or {}
+        ent.fields = {**(props.get("fields") or {}), "_write_date": props.get("write_date")}
         ent.seq = seq
         if obj["model"] == "slide.channel":
             session.info.pop("cdp_catalog", None)

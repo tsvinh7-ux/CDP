@@ -5,95 +5,336 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CDP Console</title>
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2433; --muted:#667085; --line:#e4e7ec; --accent:#2f6fed; --ok:#12805c; --warn:#b54708; }
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2433; --muted:#667085; --line:#e4e7ec; --accent:#2f6fed; --accent-soft:#eef2ff;
+          --ok:#12805c; --warn:#b54708; --bad:#b42318; }
   * { box-sizing: border-box; }
   body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
-  header { display:flex; gap:16px; align-items:center; padding:14px 24px; background:var(--card); border-bottom:1px solid var(--line); }
-  header h1 { font-size:17px; margin:0; }
-  header .muted { margin-left:auto; }
-  main { padding:20px 24px; display:grid; gap:20px; grid-template-columns: 1fr 1fr; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 24px; background:var(--card); border-bottom:1px solid var(--line); }
+  header h1 { font-size:17px; margin:0 8px 0 0; }
+  header .spacer { flex:1; }
+  nav { display:flex; gap:4px; padding:0 24px; background:var(--card); border-bottom:1px solid var(--line); overflow-x:auto; }
+  nav button { border:0; background:none; padding:10px 14px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; font:inherit; white-space:nowrap; }
+  nav button.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  main { padding:20px 24px; }
+  .tab { display:none; gap:20px; grid-template-columns: 1fr 1fr; }
+  .tab.active { display:grid; }
   section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
   section.wide { grid-column: 1 / -1; }
-  h2 { font-size:14px; margin:0 0 12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
-  .kpis { display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; }
+  h2 { font-size:13px; margin:0 0 12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .kpis { display:grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap:12px; }
   .kpi { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
   .kpi b { display:block; font-size:22px; }
   .kpi span { color:var(--muted); font-size:12px; }
   table { width:100%; border-collapse:collapse; }
   th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   th { font-size:12px; color:var(--muted); font-weight:600; }
+  td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; }
   tr.click { cursor:pointer; } tr.click:hover { background:#f0f4ff; }
-  .tag { display:inline-block; padding:1px 7px; margin:1px 2px 1px 0; border-radius:10px; background:#eef2ff; color:#3538cd; font-size:12px; }
+  .tag { display:inline-block; padding:1px 7px; margin:1px 2px 1px 0; border-radius:10px; background:var(--accent-soft); color:#3538cd; font-size:12px; }
   .tag.trigger { background:#fff4ed; color:var(--warn); }
+  .tag.ok { background:#ecfdf3; color:var(--ok); } .tag.bad { background:#fef3f2; color:var(--bad); }
   .src { font-size:11px; padding:1px 6px; border-radius:4px; background:#ecfdf3; color:var(--ok); }
-  .src.web { background:#eff8ff; color:#175cd3; }
+  .src.web { background:#eff8ff; color:#175cd3; } .src.zalo { background:#f4f3ff; color:#5925dc; }
   .muted { color:var(--muted); }
-  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow:auto; max-height:420px; font-size:12px; }
-  .scroll { max-height:420px; overflow:auto; }
-  button { border:1px solid var(--line); background:var(--card); padding:6px 12px; border-radius:6px; cursor:pointer; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding:16px; } }
+  pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow:auto; max-height:360px; font-size:12px; }
+  .scroll { max-height:460px; overflow:auto; }
+  button, select, input, textarea { font:inherit; }
+  .btn { border:1px solid var(--line); background:var(--card); padding:6px 12px; border-radius:6px; cursor:pointer; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.danger { color:var(--bad); }
+  input, select, textarea { border:1px solid var(--line); border-radius:6px; padding:6px 8px; background:#fff; color:var(--ink); }
+  textarea { width:100%; min-height:110px; font-family: ui-monospace, monospace; font-size:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+  .row > label { min-width:110px; color:var(--muted); }
+  .cond { display:grid; grid-template-columns: 2fr 1.2fr 1.2fr auto; gap:6px; margin-bottom:6px; }
+  .bar { height:8px; background:var(--accent); border-radius:4px; }
+  .notice { padding:8px 12px; border-radius:6px; background:#ecfdf3; color:var(--ok); margin-top:8px; display:none; }
+  @media (max-width: 900px) { .tab.active { grid-template-columns: 1fr; } main { padding:16px; } .cond { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <header>
   <h1>DMAG CDP Console</h1>
-  <span id="tenant" class="tag"></span>
-  <button id="run">Chạy jobs &amp; đồng bộ Odoo</button>
+  <select id="tenant"></select>
+  <span class="spacer"></span>
+  <button class="btn" id="reconcile">Đối soát với Odoo</button>
+  <button class="btn primary" id="run">Chạy jobs &amp; đồng bộ</button>
   <span class="muted" id="updated"></span>
 </header>
+<nav id="tabs">
+  <button data-tab="overview" class="active">Tổng quan</button>
+  <button data-tab="segments">Phân khúc</button>
+  <button data-tab="profiles">Hồ sơ</button>
+  <button data-tab="destinations">Kênh kích hoạt</button>
+  <button data-tab="reports">Báo cáo</button>
+  <button data-tab="privacy">Quyền riêng tư</button>
+</nav>
 <main>
-  <section class="wide"><h2>Tổng quan</h2><div class="kpis" id="kpis"></div></section>
-  <section class="wide"><h2>Phân khúc</h2><table id="segments"></table></section>
-  <section class="wide"><h2>Hồ sơ khách hàng</h2><div class="scroll"><table id="profiles"></table></div></section>
-  <section><h2>Sự kiện mới nhất</h2><div class="scroll"><table id="events"></table></div></section>
-  <section><h2>Chi tiết hồ sơ</h2><div id="detail" class="muted">Chọn một hồ sơ ở bảng trên.</div></section>
+  <div class="tab active" id="tab-overview">
+    <section class="wide"><h2>Tổng quan</h2><div class="kpis" id="kpis"></div></section>
+    <section><h2>Phân khúc</h2><table id="seg-mini"></table></section>
+    <section><h2>Sự kiện mới nhất</h2><div class="scroll"><table id="events"></table></div></section>
+  </div>
+
+  <div class="tab" id="tab-segments">
+    <section><h2>Danh sách phân khúc</h2><div class="scroll"><table id="segments"></table></div></section>
+    <section>
+      <h2 id="builder-title">Tạo phân khúc</h2>
+      <div class="row"><label>Mã (key)</label><input id="sb-key" placeholder="vd: owners_implant_interest"></div>
+      <div class="row"><label>Tên</label><input id="sb-name" style="flex:1" placeholder="Tên hiển thị trong Odoo"></div>
+      <div class="row"><label>Mô tả</label><input id="sb-desc" style="flex:1"></div>
+      <div class="row"><label>Điều kiện</label>
+        <select id="sb-match"><option value="all">Thỏa TẤT CẢ</option><option value="any">Thỏa BẤT KỲ</option></select>
+        <button class="btn" id="sb-add">+ Điều kiện</button></div>
+      <div id="sb-conds"></div>
+      <div class="row"><label>Trigger</label><label><input type="checkbox" id="sb-trigger"> Báo về Odoo/kênh khi khách vào phân khúc</label></div>
+      <div class="row"><label>Kích hoạt</label><label><input type="checkbox" id="sb-active" checked> Đang dùng</label></div>
+      <div class="row"><button class="btn" id="sb-preview">Xem trước</button><button class="btn primary" id="sb-save">Lưu</button>
+        <button class="btn" id="sb-new">Làm mới</button></div>
+      <div id="sb-result" class="muted"></div>
+      <div class="notice" id="sb-notice"></div>
+    </section>
+  </div>
+
+  <div class="tab" id="tab-profiles">
+    <section class="wide">
+      <div class="row"><h2 style="margin:0">Hồ sơ khách hàng</h2><span class="spacer"></span>
+        <input id="q" placeholder="Tìm tên, phòng khám, phân khúc…" style="min-width:260px"></div>
+      <div class="scroll"><table id="profiles"></table></div>
+    </section>
+    <section class="wide"><h2>Chi tiết hồ sơ</h2><div id="detail" class="muted">Chọn một hồ sơ ở bảng trên.</div></section>
+  </div>
+
+  <div class="tab" id="tab-destinations">
+    <section class="wide"><h2>Kênh kích hoạt</h2><table id="dests"></table></section>
+    <section>
+      <h2>Thêm kênh</h2>
+      <div class="row"><label>Loại</label><select id="d-type">
+        <option value="facebook_capi">Facebook Conversions API</option>
+        <option value="facebook_audience">Facebook Custom Audiences</option>
+        <option value="zalo_zns">Zalo ZNS + OA webhook</option></select></div>
+      <div class="row"><label>Tên</label><input id="d-name" style="flex:1"></div>
+      <label class="muted">Cấu hình (JSON)</label><textarea id="d-config"></textarea>
+      <label class="muted">Bí mật (JSON, được mã hóa khi lưu)</label><textarea id="d-secrets"></textarea>
+      <div class="row"><button class="btn primary" id="d-save">Lưu kênh</button></div>
+      <div class="notice" id="d-notice"></div>
+    </section>
+    <section><h2>Gửi gần đây</h2><div class="scroll"><table id="deliveries"></table></div></section>
+  </div>
+
+  <div class="tab" id="tab-reports">
+    <section class="wide"><h2>Doanh thu theo nguồn khách (first-touch)</h2><table id="attribution"></table>
+      <p class="muted">Đơn đã thanh toán, gán cho nguồn đầu tiên đưa khách đến (utm_source / chiến dịch).</p></section>
+  </div>
+
+  <div class="tab" id="tab-privacy">
+    <section class="wide"><h2>Nhật ký yêu cầu quyền dữ liệu (Luật 91/2025/QH15)</h2><table id="privacy"></table></section>
+  </div>
 </main>
 <script>
 const qs = new URLSearchParams(location.search);
 const token = qs.get('token') || '';
 let tenant = qs.get('tenant');
-const api = (p, opt={}) => fetch(p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token), opt).then(r => r.json());
+let segNames = {}, triggerKeys = new Set(), meta = {operators: {}, traits: []}, profilesCache = [];
+const api = (p, opt = {}) => fetch(p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token),
+  Object.assign({headers: {'Content-Type': 'application/json'}}, opt)).then(async r => {
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    return body;
+  });
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = v => v ? Number(v).toLocaleString('vi-VN') + 'đ' : '–';
 const time = v => v ? new Date(v).toLocaleString('vi-VN') : '–';
-let segNames = {}, triggerKeys = new Set();
+const $ = id => document.getElementById(id);
+const flash = (id, text, ok = true) => { const el = $(id); el.textContent = text; el.style.display = 'block';
+  el.style.background = ok ? '#ecfdf3' : '#fef3f2'; el.style.color = ok ? 'var(--ok)' : 'var(--bad)'; setTimeout(() => el.style.display = 'none', 5000); };
+
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + b.dataset.tab));
+});
+
+async function init() {
+  const ts = await api('/v1/admin/tenants');
+  tenant = tenant || (ts[0] && ts[0].id);
+  $('tenant').innerHTML = ts.map(t => `<option value="${esc(t.id)}" ${t.id === tenant ? 'selected' : ''}>${esc(t.name)} (${esc(t.id)})</option>`).join('');
+  $('tenant').onchange = e => { tenant = e.target.value; load(); };
+  meta = await api('/v1/admin/meta');
+  resetBuilder();
+  load();
+  setInterval(load, 10000);
+}
 
 async function load() {
-  if (!tenant) { const ts = await api('/v1/admin/tenants'); tenant = ts[0] && ts[0].id; }
-  document.getElementById('tenant').textContent = 'tenant: ' + tenant;
-  const [stats, segs, profs, evs] = await Promise.all([
+  if (!tenant) return;
+  const [stats, segs, profs, evs, dests, dels, attr, priv] = await Promise.all([
     api('/v1/admin/stats?tenant=' + tenant), api('/v1/admin/segments?tenant=' + tenant),
-    api('/v1/admin/profiles?tenant=' + tenant), api('/v1/admin/events?limit=60&tenant=' + tenant)]);
+    api('/v1/admin/profiles?limit=500&tenant=' + tenant), api('/v1/admin/events?limit=60&tenant=' + tenant),
+    api('/v1/admin/destinations?tenant=' + tenant), api('/v1/admin/deliveries?tenant=' + tenant),
+    api('/v1/admin/reports/attribution?tenant=' + tenant), api('/v1/admin/privacy-requests?tenant=' + tenant)]);
   const labels = {events:'Sự kiện', events_web:'Từ website', events_odoo:'Từ Odoo', profiles:'Hồ sơ',
     known_profiles:'Đã định danh', anonymous_profiles:'Ẩn danh', accounts:'Phòng khám', merged_profiles:'Đã gộp', merge_suggestions:'Đề xuất gộp'};
-  document.getElementById('kpis').innerHTML = Object.entries(labels).map(([k, l]) => `<div class="kpi"><b>${stats[k] ?? 0}</b><span>${l}</span></div>`).join('');
+  $('kpis').innerHTML = Object.entries(labels).map(([k, l]) => `<div class="kpi"><b>${stats[k] ?? 0}</b><span>${l}</span></div>`).join('');
   segNames = Object.fromEntries(segs.map(s => [s.key, s.name]));
   triggerKeys = new Set(segs.filter(s => s.trigger_on_enter).map(s => s.key));
-  document.getElementById('segments').innerHTML = '<tr><th>Khóa</th><th>Tên</th><th>Thành viên</th><th>Trigger</th></tr>' +
-    segs.map(s => `<tr><td><code>${esc(s.key)}</code></td><td>${esc(s.name)}</td><td>${s.member_count}</td><td>${s.trigger_on_enter ? '⚡ khi vào' : ''}</td></tr>`).join('');
-  document.getElementById('profiles').innerHTML = '<tr><th>Tên / ID</th><th>Loại</th><th>Vai trò</th><th>Phòng khám</th><th>RFM</th><th>Chi tiêu</th><th>Engage</th><th>Phân khúc</th></tr>' +
-    profs.map(p => `<tr class="click" data-id="${p.id}"><td>${esc(p.name || (p.partner_id ? 'partner ' + p.partner_id : 'Khách ẩn danh'))}<br><span class="muted">${p.partner_id ? 'Odoo #' + p.partner_id : esc(p.id.slice(0, 14))}</span></td>
+  window._segs = segs;
+  $('seg-mini').innerHTML = '<tr><th>Phân khúc</th><th class="num">Thành viên</th></tr>' +
+    segs.filter(s => s.active).map(s => `<tr><td>${esc(s.name)}${s.trigger_on_enter ? ' <span class="tag trigger">⚡</span>' : ''}</td><td class="num">${s.member_count}</td></tr>`).join('');
+  $('segments').innerHTML = '<tr><th>Tên / khóa</th><th class="num">TV</th><th></th></tr>' +
+    segs.map(s => `<tr><td>${esc(s.name)}<br><code class="muted">${esc(s.key)}</code> ${s.trigger_on_enter ? '<span class="tag trigger">⚡ trigger</span>' : ''} ${s.active ? '' : '<span class="tag bad">tắt</span>'}</td>
+      <td class="num">${s.member_count}</td><td><button class="btn" data-edit="${esc(s.key)}">Sửa</button></td></tr>`).join('');
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editSegment(b.dataset.edit));
+  profilesCache = profs;
+  renderProfiles();
+  $('events').innerHTML = '<tr><th>Thời điểm</th><th>Nguồn</th><th>Sự kiện</th></tr>' +
+    evs.map(e => `<tr><td>${time(e.occurred_at)}</td><td><span class="src ${e.source}">${e.source}</span></td><td>${esc(e.type)}<br><span class="muted">${esc(JSON.stringify(e.properties || {}).slice(0, 90))}</span></td></tr>`).join('');
+  $('dests').innerHTML = '<tr><th>Kênh</th><th>Loại</th><th>Trạng thái</th><th>Đã gửi / bỏ qua / lỗi</th><th>Lỗi gần nhất</th></tr>' +
+    (dests.length ? dests.map(d => `<tr><td>${esc(d.name)}</td><td>${esc(d.type)}</td><td>${d.enabled ? '<span class="tag ok">bật</span>' : '<span class="tag bad">tắt</span>'}</td>
+      <td>${d.deliveries.sent || 0} / ${d.deliveries.skipped || 0} / ${(d.deliveries.failed || 0)}</td><td class="muted">${esc(d.last_error || '')}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">Chưa cấu hình kênh nào.</td></tr>');
+  $('deliveries').innerHTML = '<tr><th>#</th><th>Loại</th><th>Mục đích</th><th>Trạng thái</th></tr>' +
+    dels.map(d => `<tr><td>${d.id}</td><td>${esc(d.kind)}</td><td>${esc(d.purpose)}</td><td>${esc(d.status)} <span class="muted">${esc(d.reason || '')}</span></td></tr>`).join('');
+  const max = Math.max(1, ...attr.rows.map(r => r.revenue));
+  $('attribution').innerHTML = '<tr><th>Nguồn</th><th>Chiến dịch</th><th class="num">Khách</th><th class="num">Đơn</th><th class="num">Doanh thu</th><th style="width:30%"></th></tr>' +
+    (attr.rows.length ? attr.rows.map(r => `<tr><td>${esc(r.source)} <span class="muted">${esc(r.medium)}</span></td><td>${esc(r.campaign)}</td>
+      <td class="num">${r.customers}</td><td class="num">${r.orders}</td><td class="num">${money(r.revenue)}</td>
+      <td><div class="bar" style="width:${(100 * r.revenue / max).toFixed(1)}%"></div></td></tr>`).join('')
+      : '<tr><td colspan="6" class="muted">Chưa có đơn đã thanh toán.</td></tr>');
+  $('privacy').innerHTML = '<tr><th>Thời điểm</th><th>Loại</th><th>Partner</th><th>Nguồn</th><th>Chi tiết</th></tr>' +
+    (priv.length ? priv.map(r => `<tr><td>${time(r.requested_at)}</td><td>${r.kind === 'erase' ? 'Xóa dữ liệu' : 'Xuất dữ liệu'}</td>
+      <td>${r.partner_id ? 'Odoo #' + r.partner_id : '–'}</td><td>${esc(r.source)}</td><td class="muted">${esc(JSON.stringify(r.details))}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">Chưa có yêu cầu.</td></tr>');
+  $('updated').textContent = 'Cập nhật ' + new Date().toLocaleTimeString('vi-VN');
+}
+
+function renderProfiles() {
+  const q = $('q').value.toLowerCase();
+  const rows = profilesCache.filter(p => !q || JSON.stringify(p).toLowerCase().includes(q) ||
+    (p.segments || []).some(k => (segNames[k] || '').toLowerCase().includes(q)));
+  $('profiles').innerHTML = '<tr><th>Tên / ID</th><th>Loại</th><th>Vai trò</th><th>Phòng khám</th><th>RFM</th><th class="num">Chi tiêu</th><th class="num">Lead</th><th>Phân khúc</th></tr>' +
+    rows.map(p => `<tr class="click" data-id="${p.id}"><td>${esc(p.name || (p.partner_id ? 'partner ' + p.partner_id : 'Khách ẩn danh'))}<br><span class="muted">${p.partner_id ? 'Odoo #' + p.partner_id : esc(p.id.slice(0, 14))}</span></td>
       <td>${p.kind === 'account' ? 'Phòng khám' : 'Người'}</td><td>${esc(p.job_role || '')}</td><td>${esc(p.clinic || '')}</td>
-      <td>${esc(p.rfm_segment || '')}</td><td>${money(p.total_spent)}</td><td>${p.engagement_score ?? ''}</td>
+      <td>${esc(p.rfm_segment || '')}</td><td class="num">${money(p.total_spent)}</td><td class="num">${p.lead_score ?? ''}</td>
       <td>${(p.segments || []).map(k => `<span class="tag ${triggerKeys.has(k) ? 'trigger' : ''}" title="${esc(segNames[k])}">${esc(k)}</span>`).join('')}</td></tr>`).join('');
   document.querySelectorAll('#profiles tr.click').forEach(tr => tr.onclick = () => show(tr.dataset.id));
-  document.getElementById('events').innerHTML = '<tr><th>Thời điểm</th><th>Nguồn</th><th>Sự kiện</th></tr>' +
-    evs.map(e => `<tr><td>${time(e.occurred_at)}</td><td><span class="src ${e.source}">${e.source}</span></td><td>${esc(e.type)}<br><span class="muted">${esc(JSON.stringify(e.properties || {}).slice(0, 90))}</span></td></tr>`).join('');
-  document.getElementById('updated').textContent = 'Cập nhật ' + new Date().toLocaleTimeString('vi-VN');
 }
+$('q').oninput = renderProfiles;
 
 async function show(id) {
   const p = await api('/v1/admin/profiles/' + id);
   const t = p.traits || {};
+  if (t.erased) { $('detail').innerHTML = `<b>Hồ sơ đã xóa</b> <span class="muted">${esc(p.id)} – ${time(t.erased_at)}</span>`; return; }
+  const consent = t.consent || {};
+  const purposes = {care: 'Chăm sóc', marketing: 'Tiếp thị', ads: 'Quảng cáo', analytics: 'Phân tích'};
   const tl = (t.timeline || []).map(x => `<tr><td>${time(x.at)}</td><td>${esc(x.label)}</td></tr>`).join('');
-  document.getElementById('detail').innerHTML = `<b>${esc(p.name || p.id)}</b> <span class="muted">${esc(p.id)}</span>
+  const rec = t.next_best_course ? `<p>Gợi ý khóa tiếp theo: <b>${esc(t.next_best_course.name)}</b> <span class="muted">(${esc(t.next_best_course.reason)})</span></p>` : '';
+  const clinicRec = t.clinic_next_course ? `<p>Gợi ý cho phòng khám: <b>${esc(t.clinic_next_course.name)}</b></p>` : '';
+  $('detail').innerHTML = `<div class="row"><b>${esc(p.name || p.id)}</b> <span class="muted">${esc(p.id)}</span><span class="spacer"></span>
+      <button class="btn" id="export">Xuất dữ liệu (JSON)</button><button class="btn danger" id="erase">Xóa dữ liệu</button></div>
     <p>${(p.segments || []).map(k => `<span class="tag">${esc(segNames[k] || k)}</span>`).join(' ') || '<span class="muted">Chưa thuộc phân khúc nào</span>'}</p>
-    ${tl ? `<table><tr><th>Thời điểm</th><th>Hoạt động</th></tr>${tl}</table>` : ''}
-    <h2 style="margin-top:14px">Traits</h2><pre>${esc(JSON.stringify(t, null, 2))}</pre>`;
+    <p>Điểm lead: <b>${t.lead_score ?? '–'}</b> <span class="muted">${esc((t.lead_score_reasons || []).join(' · '))}</span></p>${rec}${clinicRec}
+    <div class="row">${Object.entries(purposes).map(([k, l]) => `<label><input type="checkbox" data-consent="${k}" ${consent[k] ? 'checked' : ''}> ${l}</label>`).join(' ')}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>${tl ? `<table><tr><th>Thời điểm</th><th>Hoạt động</th></tr>${tl}</table>` : ''}</div>
+      <div><pre>${esc(JSON.stringify(t, null, 2))}</pre></div></div>`;
+  document.querySelectorAll('[data-consent]').forEach(cb => cb.onchange = async () => {
+    await api(`/v1/admin/profiles/${id}/consent`, {method: 'POST', body: JSON.stringify({purpose: cb.dataset.consent, granted: cb.checked, channel: 'admin', evidence: 'CDP console'})});
+    show(id);
+  });
+  $('export').onclick = async () => {
+    const data = await api(`/v1/admin/profiles/${id}/export`);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'}));
+    a.download = `cdp-export-${id}.json`; a.click();
+  };
+  $('erase').onclick = async () => {
+    if (!confirm('Xóa toàn bộ dữ liệu cá nhân của hồ sơ này trong CDP? Không thể hoàn tác.')) return;
+    await api(`/v1/admin/profiles/${id}/erase`, {method: 'POST'}); show(id); load();
+  };
 }
 
-document.getElementById('run').onclick = async () => { await api('/v1/admin/run-jobs' + (tenant ? '?tenant=' + tenant : ''), {method: 'POST'}); load(); };
-load(); setInterval(load, 5000);
+// ---------------------------------------------------------------- segment builder
+function condRow(c = {}) {
+  const div = document.createElement('div'); div.className = 'cond';
+  const traits = meta.traits.map(t => `<option value="${esc(t.path)}" ${t.path === c.trait ? 'selected' : ''}>${esc(t.label)}</option>`).join('');
+  const known = meta.traits.some(t => t.path === c.trait);
+  div.innerHTML = `<select class="c-trait">${traits}<option value="__custom" ${c.trait && !known ? 'selected' : ''}>Trait khác…</option></select>
+    <select class="c-op">${Object.entries(meta.operators).map(([k, l]) => `<option value="${k}" ${k === c.op ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    <input class="c-val" placeholder="giá trị" value="${esc(c.value ?? '')}"><button class="btn">✕</button>`;
+  if (c.trait && !known) div.querySelector('.c-trait').insertAdjacentHTML('afterend', `<input class="c-custom" value="${esc(c.trait)}">`);
+  div.querySelector('.c-trait').onchange = e => { if (e.target.value === '__custom' && !div.querySelector('.c-custom')) e.target.insertAdjacentHTML('afterend', '<input class="c-custom" placeholder="đường dẫn trait, vd clinic.city">'); };
+  div.querySelector('button').onclick = () => div.remove();
+  $('sb-conds').appendChild(div);
+}
+function readRule() {
+  const conds = [...document.querySelectorAll('#sb-conds .cond')].map(d => {
+    const sel = d.querySelector('.c-trait').value;
+    const trait = sel === '__custom' ? (d.querySelector('.c-custom')?.value || '') : sel;
+    const raw = d.querySelector('.c-val').value.trim();
+    const cond = {trait, op: d.querySelector('.c-op').value};
+    if (raw !== '') cond.value = raw !== '' && !isNaN(Number(raw)) ? Number(raw) : (raw === 'true' ? true : raw === 'false' ? false : raw);
+    return cond;
+  });
+  return conds.length === 1 ? conds[0] : {[$('sb-match').value]: conds};
+}
+function resetBuilder() {
+  $('builder-title').textContent = 'Tạo phân khúc';
+  ['sb-key', 'sb-name', 'sb-desc'].forEach(i => $(i).value = '');
+  $('sb-key').disabled = false; $('sb-trigger').checked = false; $('sb-active').checked = true;
+  $('sb-conds').innerHTML = ''; condRow({trait: 'job_role', op: 'eq', value: 'clinic_owner'}); $('sb-result').textContent = '';
+}
+function editSegment(key) {
+  const s = (window._segs || []).find(x => x.key === key); if (!s) return;
+  document.querySelector('[data-tab=segments]').click();
+  $('builder-title').textContent = 'Sửa phân khúc';
+  $('sb-key').value = s.key; $('sb-key').disabled = true; $('sb-name').value = s.name; $('sb-desc').value = s.description || '';
+  $('sb-trigger').checked = s.trigger_on_enter; $('sb-active').checked = s.active; $('sb-conds').innerHTML = '';
+  const conds = s.rule.all || s.rule.any || [s.rule];
+  $('sb-match').value = s.rule.any ? 'any' : 'all';
+  conds.forEach(c => c.trait ? condRow(c) : null);
+}
+$('sb-add').onclick = () => condRow();
+$('sb-new').onclick = resetBuilder;
+$('sb-preview').onclick = async () => {
+  try {
+    const r = await api('/v1/admin/segments/preview?tenant=' + tenant, {method: 'POST', body: JSON.stringify({rule: readRule()})});
+    $('sb-result').innerHTML = `<b>${r.count}</b> hồ sơ (${r.known} đã định danh): ${r.sample.map(x => esc(x.name)).join(', ')}`;
+  } catch (e) { $('sb-result').textContent = 'Lỗi: ' + e.message; }
+};
+$('sb-save').onclick = async () => {
+  const key = $('sb-key').value.trim();
+  if (!/^[a-z0-9_]{3,64}$/.test(key)) return flash('sb-notice', 'Mã chỉ gồm chữ thường, số, gạch dưới (3–64 ký tự).', false);
+  try {
+    await api(`/v1/admin/segments/${key}?tenant=${tenant}`, {method: 'PUT', body: JSON.stringify({
+      name: $('sb-name').value || key, description: $('sb-desc').value, rule: readRule(),
+      trigger_on_enter: $('sb-trigger').checked, active: $('sb-active').checked})});
+    flash('sb-notice', 'Đã lưu. Thành viên được tính lại ở lần chạy jobs tiếp theo.'); load();
+  } catch (e) { flash('sb-notice', 'Lỗi: ' + e.message, false); }
+};
+
+// ---------------------------------------------------------------- destinations
+const templates = {
+  facebook_capi: [{pixel_id: '', test_event_code: ''}, {access_token: ''}],
+  facebook_audience: [{ad_account_id: 'act_', segments: ['high_value', 'clinic_owners']}, {access_token: ''}],
+  zalo_zns: [{app_id: '', oa_id: '', mode: 'development', templates: {checkout_abandoned: {template_id: '', purpose: 'marketing',
+    data: {customer_name: 'name', amount: 'open_cart.amount'}}}}, {secret_key: '', refresh_token: '', oa_secret_key: ''}],
+};
+function fillTemplate() { const [c, s] = templates[$('d-type').value]; $('d-config').value = JSON.stringify(c, null, 2); $('d-secrets').value = JSON.stringify(s, null, 2); }
+$('d-type').onchange = fillTemplate; fillTemplate();
+$('d-save').onclick = async () => {
+  try {
+    await api('/v1/admin/destinations?tenant=' + tenant, {method: 'POST', body: JSON.stringify({type: $('d-type').value,
+      name: $('d-name').value || $('d-type').value, config: JSON.parse($('d-config').value), secrets: JSON.parse($('d-secrets').value)})});
+    flash('d-notice', 'Đã lưu kênh (bí mật được mã hóa).'); load();
+  } catch (e) { flash('d-notice', 'Lỗi: ' + e.message, false); }
+};
+
+$('run').onclick = async () => { await api('/v1/admin/run-jobs?tenant=' + tenant, {method: 'POST'}); load(); };
+$('reconcile').onclick = async () => {
+  try { const r = await api('/v1/admin/reconcile?tenant=' + tenant, {method: 'POST'}); alert('Đối soát: ' + JSON.stringify(r)); }
+  catch (e) { alert('Lỗi đối soát: ' + e.message); }
+};
+init();
 </script>
 </body>
 </html>

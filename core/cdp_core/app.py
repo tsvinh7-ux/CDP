@@ -127,6 +127,7 @@ def _profile_doc(p: Profile, full: bool = False) -> dict:
         "rfm_segment": t.get("rfm_segment"), "total_spent": t.get("total_spent"),
         "engagement_score": t.get("engagement_score"), "segments": p.segment_keys or [],
         "last_seen_at": t.get("last_seen_at"), "updated_at": iso(p.updated_at), "dirty": p.dirty,
+        "lead_score": t.get("lead_score"),
     }
     if full:
         doc["traits"] = t
@@ -207,7 +208,7 @@ def events(tenant: str, limit: int = 50, profile_id: str | None = None):
 def profiles(tenant: str, q: str | None = None, segment: str | None = None, limit: int = 100):
     with session_scope() as s:
         query = select(Profile).where(Profile.tenant_id == tenant, Profile.merged_into.is_(None))
-        rows = s.scalars(query.order_by(desc(Profile.updated_at)).limit(min(limit, 1000))).all()
+        rows = s.scalars(query.order_by(desc(Profile.updated_at)).limit(min(limit, 5000))).all()
         docs = [_profile_doc(p) for p in rows]
         if segment:
             docs = [d for d in docs if segment in d["segments"]]
@@ -397,3 +398,37 @@ def privacy_requests(tenant: str):
 def report_attribution(tenant: str):
     with session_scope() as s:
         return analytics.attribution(s, tenant)
+
+
+# --------------------------------------------------------------------------- segment builder & reconciliation
+
+@app.get("/v1/admin/meta", dependencies=[Depends(admin)])
+def meta():
+    from .segments import OPERATORS, TRAIT_CATALOG
+    return {"operators": OPERATORS,
+            "traits": [{"path": p, "label": label, "kind": kind} for p, label, kind in TRAIT_CATALOG]}
+
+
+class PreviewIn(BaseModel):
+    rule: dict
+
+
+@app.post("/v1/admin/segments/preview", dependencies=[Depends(admin)])
+def preview_segment(tenant: str, body: PreviewIn):
+    from .segments import evaluate
+    from .models import utcnow
+    now = utcnow()
+    with session_scope() as s:
+        rows = s.scalars(select(Profile).where(Profile.tenant_id == tenant, Profile.kind == "person",
+                                               Profile.merged_into.is_(None))).all()
+        try:
+            matched = [p for p in rows if not (p.traits or {}).get("erased") and evaluate(body.rule, p.traits or {}, now)]
+        except (KeyError, ValueError, TypeError) as exc:
+            raise HTTPException(400, f"invalid rule: {exc}")
+        return {"count": len(matched), "known": sum(1 for p in matched if p.partner_id),
+                "sample": [{"id": p.id, "name": (p.traits or {}).get("name") or "Khách ẩn danh"} for p in matched[:10]]}
+
+
+@app.post("/v1/admin/reconcile", dependencies=[Depends(admin)])
+def reconcile(tenant: str):
+    return jobs.reconcile(tenant)
