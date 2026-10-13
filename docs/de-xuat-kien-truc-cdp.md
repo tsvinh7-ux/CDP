@@ -1,253 +1,281 @@
-# Đề xuất kiến trúc CDP tích hợp Odoo 17 Community (bản Bizapp customize)
+# Đề xuất kiến trúc CDP cho DMAG, tích hợp Odoo 17 Community (bản Bizapp customize)
 
-> Phiên bản: 0.1 (bản nháp để thảo luận) · Ngày: 13/10/2026
+> Phiên bản: 0.2 · Ngày: 13/10/2026
+> Thay đổi so với 0.1: cập nhật theo bối cảnh DMAG (đào tạo nha khoa, ~100–150k nhân sự nha khoa, bán chủ lực qua web + Zalo, Facebook dẫn traffic), Odoo đã có Marketing Automation do Bizapp customize, Odoo chạy trên server của Bizapp, định hướng sau này thương mại hóa CDP cho phòng khám nha khoa và các ngành khác.
 
 ## 1. Tóm tắt kết luận
 
-**Không nên xây CDP thuần là một module Odoo. Cũng không nên xây một platform tách rời hoàn toàn khỏi Odoo.**
+**Xây CDP thành một platform riêng, do DMAG sở hữu, kết nối với Odoo qua một module connector mỏng.** Bối cảnh mới làm khuyến nghị này rõ ràng hơn:
 
-Khuyến nghị: **CDP là một platform riêng (composable / warehouse-native) + một module Odoo mỏng làm "connector"** (`bizapp_cdp_connector`).
-
-- **Platform CDP riêng**: thu thập sự kiện, hợp nhất danh tính (identity resolution), hồ sơ khách hàng hợp nhất (golden record), tính toán chỉ số (RFM, CLV, churn…), phân khúc, kích hoạt ra các kênh (Zalo ZNS, SMS, email, Facebook/Google/TikTok audiences).
-- **Module Odoo mỏng**: đẩy sự kiện nghiệp vụ từ Odoo sang CDP (outbox pattern), nhận ngược lại phân khúc/điểm/nhãn từ CDP ghi vào `res.partner`, và hiển thị tab **Customer 360** ngay trên form khách hàng trong Odoo.
-
-Người dùng nghiệp vụ vẫn "cảm thấy" CDP nằm trong Odoo, nhưng phần nặng (dữ liệu sự kiện, tính toán, real-time) chạy bên ngoài, không làm chậm ERP và không bị khóa vào vòng đời nâng cấp của Odoo/Bizapp.
+1. **Định hướng thành sản phẩm.** Khách hàng tương lai (phòng khám nha khoa, các bên khác) phần lớn **không dùng Odoo**. Nếu CDP là module Odoo, sản phẩm sẽ không bán được cho họ. Odoo phải là *một nguồn dữ liệu trong nhiều nguồn*, không phải nền tảng chứa CDP.
+2. **Odoo đã có Marketing Automation (Bizapp customize).** CDP **không xây lại** journey/email/SMS automation ở giai đoạn đầu. CDP tập trung vào thứ Odoo không làm tốt: tracking hành vi web, hợp nhất danh tính, chấm điểm, phân khúc. Kết quả đẩy vào Odoo để Marketing Automation hiện có dùng.
+3. **Quy mô 100–150k hồ sơ là vừa phải.** Không cần hạ tầng "big data" ở giai đoạn đầu. MVP chạy được trên 2 máy chủ, nhưng nên thiết kế sẵn để mở rộng và phục vụ nhiều khách hàng (multi-tenant).
+4. **Odoo chạy trên server của Bizapp.** Cơ chế đồng bộ chính nên là **đẩy sự kiện qua HTTPS từ module connector** (outbox pattern). Đọc trực tiếp WAL của PostgreSQL (CDC) không nên làm cơ chế chính, vì đó là kết nối cấp database xuyên hai tổ chức và có rủi ro làm đầy ổ đĩa server Odoo (xem mục 5.1).
 
 ---
 
-## 2. CDP "chuẩn concept" là gì — tiêu chí để đánh giá
+## 2. CDP "chuẩn concept" — 7 năng lực
 
-Theo định nghĩa của CDP Institute, một "Real CDP" phải có: *phần mềm đóng gói, tạo ra cơ sở dữ liệu khách hàng thống nhất, lưu trữ lâu dài, và các hệ thống khác truy cập được.* Một CDP hiện đại (2025–2026) thường gồm 7 năng lực:
+| # | Năng lực | Với DMAG cụ thể là |
+|---|----------|------------------|
+| 1 | **Ingestion** | Đơn hàng, ghi danh, tiến độ học từ Odoo; hành vi trên web (xem khóa, video, giỏ hàng, checkout); Zalo OA/ZNS; Facebook (UTM, lead form) |
+| 2 | **Identity resolution** | Ghép khách vô danh trên web + SĐT + email + Zalo ID + Facebook lead + `res.partner` thành một người |
+| 3 | **Unified profile** | Hồ sơ 360° của **người học** và của **phòng khám** họ làm việc (mô hình B2B2C) |
+| 4 | **Computed traits & AI** | RFM, CLV, mức độ học (engagement), lộ trình khóa học, lead score cho khóa offline giá cao, gợi ý khóa tiếp theo |
+| 5 | **Segmentation** | Phân khúc động, tự cập nhật, batch và real-time |
+| 6 | **Activation** | Đẩy phân khúc vào Odoo Marketing Automation, Zalo ZNS, Facebook Custom Audiences + Conversions API, CRM của sales |
+| 7 | **Governance & Privacy** | Consent, xóa/truy cập dữ liệu theo **Luật Bảo vệ dữ liệu cá nhân 91/2025/QH15 (hiệu lực 01/01/2026)** |
 
-| # | Năng lực | Mô tả ngắn |
-|---|----------|-----------|
-| 1 | **Ingestion** | Thu thập dữ liệu từ mọi nguồn: ERP (Odoo), web/app tracking, POS, sàn TMĐT, Zalo OA, Facebook, call center… cả batch và real-time |
-| 2 | **Identity resolution** | Ghép các định danh (SĐT, email, Zalo ID, cookie/device ID, partner_id Odoo, mã thẻ thành viên) thành một con người duy nhất; hỗ trợ merge/unmerge |
-| 3 | **Unified profile (Golden record)** | Hồ sơ 360°: thuộc tính, lịch sử giao dịch, hành vi, sự đồng ý (consent) — với quy tắc ưu tiên nguồn (survivorship) |
-| 4 | **Computed traits & AI** | RFM, CLV, tần suất mua, ngành hàng yêu thích, xác suất rời bỏ, next-best-product |
-| 5 | **Segmentation** | Phân khúc động (tự cập nhật), batch và real-time, builder cho marketer không cần SQL |
-| 6 | **Activation / Orchestration** | Đẩy phân khúc ra kênh: Odoo, Zalo ZNS, SMS, email, ads audiences; journey tự động |
-| 7 | **Governance & Privacy** | Consent, quyền xóa/truy cập dữ liệu, phân quyền, audit log — tuân thủ **Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15 (hiệu lực 01/01/2026)** |
-
-Xu hướng "hiện đại" hiện nay là **Composable CDP / Warehouse-native CDP**: dữ liệu nằm trong kho dữ liệu của chính doanh nghiệp (ClickHouse/BigQuery/Postgres…), các thành phần (thu thập, mô hình hóa, kích hoạt) là các khối ghép được, thay vì một hộp đen đóng gói.
+Kiến trúc theo hướng **Composable / Warehouse-native CDP**: dữ liệu nằm trong kho do DMAG làm chủ (ClickHouse + PostgreSQL), các khối thu thập, mô hình hóa và kích hoạt ghép được với nhau.
 
 ---
 
-## 3. Phân tích: làm module Odoo có được không?
+## 3. Vì sao không làm CDP thuần trong Odoo (cập nhật)
 
-### 3.1. Làm được — nhưng chỉ ở mức "Customer 360 trong ERP"
+| Lý do | Giải thích |
+|-------|-----------|
+| **Chặn đường thương mại hóa** | Phòng khám nha khoa dùng phần mềm quản lý phòng khám riêng, rất ít dùng Odoo. CDP trong Odoo thì không bán được cho họ. Nếu bắt họ cài Odoo chỉ để dùng CDP thì không khả thi. |
+| **Không kiểm soát hạ tầng** | Odoo chạy trên server của Bizapp. Đặt CDP (dữ liệu tracking lớn, job tính toán nặng) vào đó thì hiệu năng ERP, backup và bảo mật đều phụ thuộc bên thứ ba. |
+| **Sở hữu trí tuệ** | Code CDP nằm trong codebase Odoo của Bizapp thì ranh giới sở hữu khó tách bạch khi bán ra ngoài. |
+| **Khối lượng sự kiện web** | Tracking web sinh ra hàng triệu event/tháng. Ghi qua ORM vào DB Odoo sẽ làm phình DB và chậm hệ thống bán hàng. |
+| **Truy vấn phân tích** | Phân khúc theo hành vi ("xem khóa Implant ≥ 3 lần trong 14 ngày, chưa mua, đã mua khóa cơ bản") là truy vấn OLAP. Columnar store (ClickHouse) nhanh hơn PostgreSQL + ORM hàng chục lần. |
+| **Phụ thuộc nâng cấp** | Mỗi lần Odoo lên 18/19 hoặc Bizapp thay đổi customize thì một khối CDP lớn phải migrate theo. |
 
-Odoo 17 Community có sẵn nền tảng tốt để làm phần "hồ sơ khách hàng":
-`res.partner`, `sale.order`, `pos.order`, `account.move`, `crm.lead`, `mass_mailing`, `base_automation` (có action *Send Webhook Notification* và trigger *On Webhook*), ORM, phân quyền, giao diện OWL. Nếu doanh nghiệp **chỉ có dữ liệu trong Odoo**, quy mô vài chục nghìn khách hàng, không tracking web/app, thì một module Odoo có thể làm: gộp trùng partner, tính RFM, gắn tag phân khúc, gửi email bằng mass_mailing.
-
-**Nhưng đó chưa phải là CDP đúng nghĩa.**
-
-### 3.2. Các giới hạn kỹ thuật khi nhồi CDP vào Odoo
-
-| Vấn đề | Lý do |
-|-------|-------|
-| **Khối lượng sự kiện** | Tracking web/app, Zalo, ads sinh ra hàng triệu–hàng chục triệu event/tháng. Ghi vào PostgreSQL của Odoo qua ORM sẽ làm phình DB ERP, chậm backup, chậm toàn hệ thống bán hàng/kế toán. |
-| **Mô hình worker của Odoo** | Odoo chạy worker đồng bộ (prefork), mỗi request chiếm 1 worker, có `limit_time_real`. Không phù hợp nhận luồng event liên tục, xử lý streaming, hay chạy job tính toán phân khúc trên hàng triệu dòng. |
-| **Truy vấn phân tích** | Phân khúc kiểu "khách đã xem sản phẩm X ≥3 lần trong 7 ngày nhưng chưa mua, tổng chi tiêu 12 tháng > 5 triệu" là truy vấn OLAP; PostgreSQL row-store + ORM kém hơn rất nhiều so với columnar store (ClickHouse). |
-| **Identity graph** | Hợp nhất danh tính là bài toán đồ thị (union-find, merge/unmerge có lịch sử). Làm trong ORM vừa phức tạp vừa dễ khóa bảng `res.partner` — bảng "nóng" nhất của Odoo. |
-| **Gắn chặt vòng đời nâng cấp** | Khi lên Odoo 18/19, mọi module custom phải migrate. CDP trong Odoo = thêm một khối code lớn phải migrate cùng các customize của Bizapp. |
-| **Phụ thuộc vào customize của Bizapp** | Nếu CDP nằm trong Odoo, mọi thay đổi của Bizapp (override model, field, view) đều có thể làm vỡ CDP và ngược lại. |
-| **Thiếu sẵn có ở bản Community** | `marketing_automation`, `social marketing`, `sign`, Studio… là Enterprise. Bản Community không có journey/automation marketing. |
-| **Đa nguồn** | CDP phải là "trung tâm" của nhiều nguồn; nếu đặt trong Odoo thì Odoo trở thành nơi hứng mọi dữ liệu ngoài ERP — sai vai trò. |
-
-### 3.3. Ngược lại, platform riêng hoàn toàn (bỏ qua Odoo) cũng không ổn
-
-- Nhân viên sales/CSKH làm việc trên Odoo; nếu họ phải mở thêm một ứng dụng khác mới xem được hồ sơ khách → tỷ lệ sử dụng thấp.
-- Đồng bộ chỉ qua XML-RPC polling sẽ chậm, tốn tải Odoo, dễ sót dữ liệu.
-- Kết quả phân khúc phải quay về Odoo (nhãn khách hàng, bảng giá, chương trình loyalty, mailing list) thì mới tạo ra giá trị kinh doanh.
-
-→ Vì vậy giải pháp hợp lý là **hybrid**.
+**Phần nào vẫn nên nằm trong Odoo:** Marketing Automation (đã có), CRM/sales pipeline, đơn hàng, hóa đơn, ghi danh. CDP **làm giàu** cho các phần này chứ không thay thế.
 
 ---
 
-## 4. Ma trận so sánh 3 phương án
-
-Thang điểm 1–5 (5 = tốt nhất).
-
-| Tiêu chí | A. Module Odoo thuần | B. Platform riêng, tích hợp lỏng | **C. Platform riêng + connector Odoo (khuyến nghị)** |
-|---|:-:|:-:|:-:|
-| Đúng concept CDP (đa nguồn, identity, real-time) | 2 | 5 | **5** |
-| Khả năng mở rộng (event volume) | 1 | 5 | **5** |
-| Không ảnh hưởng hiệu năng ERP | 2 | 4 | **5** |
-| Trải nghiệm người dùng Odoo | 5 | 2 | **4** |
-| Đồng bộ tự động, gần real-time với Odoo | 5 (nội bộ) | 2 | **5** |
-| Độc lập với nâng cấp Odoo/Bizapp | 1 | 5 | **4** |
-| Chi phí & thời gian MVP | **5** | 2 | 3 |
-| Chi phí vận hành hạ tầng | **5** | 3 | 3 |
-| **Tổng** | 26 | 28 | **34** |
-
-Phương án A chỉ nên chọn nếu: <50k khách hàng, chỉ dữ liệu từ Odoo, không có kênh online, ngân sách rất hạn chế. Ngay cả khi đó, nên thiết kế A sao cho sau này có thể "nhấc" ra thành C.
-
----
-
-## 5. Kiến trúc đề xuất (Phương án C)
+## 4. Mô hình dữ liệu đặc thù DMAG: B2B2C nha khoa
 
 ```
-                        ┌───────────────────────────── NGUỒN DỮ LIỆU ─────────────────────────────┐
-                        │ Odoo 17 (Bizapp)   Web/App SDK   Zalo OA   FB/TikTok   Shopee/Lazada   POS │
-                        └───────┬───────────────┬────────────┬──────────┬─────────────┬────────────┘
-                                │               │            │          │             │
-              (1) CDC Debezium  │  (2) Outbox   │            ▼          ▼             ▼
-              trên WAL Postgres │  events từ    │      ┌─────────────────────────────────────┐
-                                │  connector    │      │  Collector API (chuẩn Segment spec)│
-                                ▼               ▼      └──────────────────┬──────────────────┘
-                        ┌──────────────────────────────────────────────────┴───────┐
-                        │        Event bus: Redpanda/Kafka (hoặc NATS khi nhỏ)       │
-                        └───────┬──────────────────────────┬────────────────────────┘
-                                │                          │
-                    ┌───────────▼───────────┐   ┌──────────▼──────────────┐
-                    │ Identity Resolution    │   │ Raw/Event store          │
-                    │ (identity graph,       │   │ ClickHouse + MinIO/S3    │
-                    │  merge/unmerge rules)  │   │ (lưu toàn bộ lịch sử)   │
-                    └───────────┬───────────┘   └──────────┬──────────────┘
-                                │                          │  dbt models
-                    ┌───────────▼──────────────────────────▼──────────────┐
-                    │ Profile Store (PostgreSQL): golden record, traits,     │
-                    │ consent, segment membership — API tra cứu < 50ms       │
-                    └───────────┬───────────────────────────┬────────────┘
-                                │                           │
-                  ┌─────────────▼────────────┐   ┌──────────▼──────────────────┐
-                  │ Segmentation engine       │   │ AI/ML: RFM, CLV, churn,     │
-                  │ (batch + real-time rules) │   │ next-best-product, LLM      │
-                  └─────────────┬────────────┘   │ "segment bằng tiếng Việt"   │
-                                │                └─────────────────────────────┘
-                  ┌─────────────▼─────────────────────────────────────────────┐
-                  │ Activation: Odoo (tag, pricelist, loyalty, mailing list),   │
-                  │ Zalo ZNS, SMS brandname, Email, FB/Google/TikTok audiences, │
-                  │ Webhook; Journey orchestration (giai đoạn 3)               │
-                  └────────────────────────────────────────────────────────────┘
-
-  Giao diện: CDP Admin (React) cho marketing/data  +  tab "Customer 360" (OWL) nhúng trong Odoo
+  Phòng khám (Account)  ──1:n──  Nhân sự nha khoa (Person)  ──n:n──  Khóa học / Ghi danh
+   - quy mô, khu vực             - vai trò: bác sĩ, phụ tá,          - online / offline / hands-on
+   - số nhân sự đã học             kỹ thuật viên, chủ phòng khám      - tiến độ, điểm, chứng chỉ
+   - tổng chi tiêu               - chuyên môn quan tâm (implant,
+   - người ra quyết định           chỉnh nha, nội nha, thẩm mỹ…)
 ```
 
-### 5.1. Đồng bộ Odoo → CDP (tự động, gần real-time)
+- Odoo đã có sẵn quan hệ công ty–liên hệ (`res.partner.parent_id`). CDP dùng quan hệ này làm gốc, đồng thời tự suy luận thêm (cùng email domain, cùng địa chỉ, người học tự khai nơi làm việc).
+- **Account-level view** rất có giá trị cho B2B: "Phòng khám X có 6 người đã học khóa cơ bản, chưa ai học nâng cao" → sales chào gói đào tạo doanh nghiệp.
+- **Định danh mạnh của nhân sự y tế:** số chứng chỉ/giấy phép hành nghề, nếu DMAG có thu thập để cấp chứng nhận. Đây là khóa ghép danh tính rất tin cậy. Tuy nhiên là dữ liệu cá nhân nên cần consent và mã hóa.
+- **Đào tạo liên tục:** theo Luật Khám bệnh, chữa bệnh 2023, giấy phép hành nghề phải gia hạn định kỳ và yêu cầu cập nhật kiến thức y khoa liên tục. Nếu khóa học của DMAG được công nhận giờ đào tạo liên tục, CDP có thể theo dõi số giờ tích lũy và nhắc người học. *(Cần xác minh quy định chi tiết và tư cách cấp giờ đào tạo của DMAG.)*
 
-Kết hợp hai cơ chế, mỗi cái giải quyết một việc:
+### Tracking plan (sự kiện cốt lõi)
 
-1. **CDC (Change Data Capture) bằng Debezium trên PostgreSQL của Odoo**
-   - Đọc WAL (logical replication), không sửa code Odoo, không tải thêm cho worker.
-   - Bắt được **mọi field custom của Bizapp** (vì đó chỉ là các cột trong bảng), kể cả thay đổi do import, script, cron.
-   - Yêu cầu: `wal_level=logical`, một replication slot, user chỉ đọc. Nên trỏ vào replica nếu có.
-   - Dùng cho: `res_partner`, `sale_order(_line)`, `pos_order(_line)`, `account_move`, `crm_lead`, `product_*`, `loyalty_*`, các bảng custom của Bizapp.
-
-2. **Outbox events từ module connector**
-   - CDC cho biết "dòng nào đổi", nhưng không cho biết **ý nghĩa nghiệp vụ** ("đơn được xác nhận", "khách đổi điểm", "phiếu bảo hành được tạo").
-   - Module `bizapp_cdp_connector` hook vào các method nghiệp vụ (`action_confirm`, `action_pos_order_paid`, …), ghi bản ghi vào bảng `cdp_outbox` **trong cùng transaction** → đảm bảo không mất sự kiện, không gửi sự kiện của transaction bị rollback.
-   - Debezium (hoặc một job `queue_job` của OCA) đọc bảng outbox và đẩy lên event bus.
-
-> Không dùng XML-RPC polling làm cơ chế chính: chậm, tốn worker Odoo, khó bắt bản ghi bị xóa. Chỉ dùng cho backfill lần đầu và đối soát (reconciliation) định kỳ.
-
-### 5.2. Đồng bộ CDP → Odoo (reverse ETL)
-
-- Module connector cung cấp model `cdp.segment`, `cdp.profile.trait` và các field `x_cdp_*` trên `res.partner` (CDP ID, RFM segment, CLV, churn score, ngày cập nhật).
-- CDP gọi API của connector (REST controller có xác thực token + HMAC) để cập nhật theo lô (batch upsert), không ghi trực tiếp vào DB Odoo.
-- Kích hoạt trong Odoo: gắn `category_id` (tag), thêm vào `mailing.list`, gán pricelist/chương trình loyalty, tạo activity cho sales ("khách VIP sắp rời bỏ — gọi lại").
-- Tab **Customer 360** trên form khách hàng: widget OWL gọi API CDP (timeline hành vi, kênh, điểm số, phân khúc) — dữ liệu không cần copy vào Odoo.
-
-### 5.3. Quyền sở hữu dữ liệu (Master data)
-
-Cần thống nhất từ đầu để tránh ghi đè vòng lặp:
-
-| Dữ liệu | Hệ thống gốc (system of record) |
-|--------|-------------------------------|
-| Đơn hàng, hóa đơn, công nợ, tồn kho | Odoo |
-| Thông tin khách do sales/CSKH nhập | Odoo |
-| Định danh hợp nhất, hành vi online, điểm số, phân khúc | CDP |
-| Consent (đồng ý nhận tin/xử lý dữ liệu) | CDP (đồng bộ bản sao về Odoo) |
-
-Quy tắc: CDP **không sửa** các field nghiệp vụ gốc của Odoo; chỉ ghi vào field `x_cdp_*` và các model `cdp.*`. Gộp trùng khách hàng trong Odoo (merge partner) là thao tác có kiểm duyệt của con người, CDP chỉ **đề xuất**.
-
-### 5.4. Identity resolution — đặc thù Việt Nam
-
-- **Chuẩn hóa SĐT**: về E.164 (`+84…`), xử lý đầu số cũ 11 số → 10 số (chuyển đổi 2018), loại bỏ khoảng trắng/dấu chấm, phát hiện SĐT "rác" (0000000000, số tổng đài, số nhân viên nhập thay khách).
-- **Email**: lowercase, xử lý alias Gmail (dấu chấm, `+tag`).
-- **Tên tiếng Việt**: chuẩn hóa Unicode NFC, bỏ dấu để so khớp mờ (chỉ dùng làm tín hiệu phụ, không dùng để merge tự động).
-- **Định danh kênh**: Zalo user ID (theo OA), Facebook PSID (theo Page), ID khách trên sàn TMĐT, mã thẻ thành viên, `res.partner.id`, cookie/device ID.
-- **Luật ghép**: deterministic trước (SĐT/email đã xác minh, Zalo ID), probabilistic sau (chỉ đề xuất, có ngưỡng tin cậy). Có giới hạn chống "siêu cụm" (một SĐT công ty gắn với hàng trăm người).
-- **Merge/unmerge có lịch sử**: lưu identity graph dạng cạnh có nguồn & thời điểm, để có thể tách lại khi ghép sai.
-
-### 5.5. Tuân thủ Luật Bảo vệ dữ liệu cá nhân (91/2025/QH15)
-
-- Lưu **consent theo mục đích** (marketing, phân tích, chia sẻ cho đối tác quảng cáo) kèm thời điểm, kênh, bằng chứng.
-- Hỗ trợ quyền của chủ thể dữ liệu: truy cập, chỉnh sửa, **rút lại đồng ý**, **xóa** — xóa phải lan sang event store và các audience đã đẩy ra ngoài.
-- Khi đẩy audience lên Facebook/Google/TikTok: chỉ gửi dữ liệu đã băm (SHA-256), chỉ với khách đã đồng ý mục đích quảng cáo.
-- Mã hóa dữ liệu nhạy cảm, phân quyền theo vai trò, audit log mọi truy cập hồ sơ.
-- Lưu trữ dữ liệu trong nước (khuyến nghị hạ tầng tại VN hoặc on-premise) và chuẩn bị hồ sơ đánh giá tác động xử lý dữ liệu cá nhân.
-
-> Phần pháp lý cần được bộ phận pháp chế/luật sư xác nhận; tài liệu này chỉ nêu các yêu cầu kỹ thuật cần chuẩn bị.
+| Nhóm | Sự kiện |
+|------|--------|
+| Web | `page_viewed`, `course_viewed`, `video_preview_played`, `course_searched`, `added_to_cart`, `checkout_started`, `signed_up`, `logged_in`, `form_submitted` |
+| Thương mại (từ Odoo) | `order_created`, `order_paid`, `order_cancelled`, `refund_issued`, `coupon_applied` |
+| Học tập | `enrolled`, `lesson_started`, `lesson_completed`, `quiz_passed`, `course_completed`, `certificate_issued`, `webinar_registered`, `webinar_attended`, `offline_class_checked_in` |
+| Zalo | `oa_followed`, `oa_unfollowed`, `oa_message_received`, `zns_sent`, `zns_delivered`, `zns_clicked` |
+| Facebook | `lead_form_submitted`, `ad_click` (từ UTM/fbclid khi vào web) |
+| CRM / Marketing (từ Odoo) | `lead_created`, `lead_stage_changed`, `email_opened`, `email_clicked`, `campaign_enrolled` |
 
 ---
 
-## 6. Công nghệ đề xuất
+## 5. Kiến trúc đề xuất
 
-| Lớp | Đề xuất | Lý do |
-|----|--------|------|
-| Ngôn ngữ backend | **Python (FastAPI)** | Đội Odoo đã quen Python; dùng chung kỹ năng, thư viện. Có thể dùng Go cho collector khi lưu lượng rất lớn. |
-| Event bus | **Redpanda** (tương thích Kafka) | Nhẹ hơn Kafka, 1 binary, dễ vận hành. Quy mô nhỏ có thể bắt đầu với NATS JetStream/Redis Streams. |
-| CDC | **Debezium** (Kafka Connect hoặc Debezium Server) | Chuẩn công nghiệp cho PostgreSQL CDC. |
-| Event/analytics store | **ClickHouse** | Columnar, cực nhanh cho phân khúc & phân tích hành vi, nén tốt, mã nguồn mở. |
-| Profile store | **PostgreSQL** | Truy vấn hồ sơ theo ID nhanh, giao dịch an toàn cho identity graph. |
-| Biến đổi dữ liệu | **dbt** | Mô hình hóa traits/RFM/CLV bằng SQL có version, test. |
-| Orchestration | **Dagster** hoặc Airflow | Lập lịch job tính traits, đồng bộ audience. |
-| Web/App SDK | Tương thích **Segment/RudderStack spec** (`identify`, `track`, `page`) | Có thể dùng SDK mã nguồn mở của RudderStack/Jitsu thay vì tự viết. |
-| Giao diện | **React + TypeScript** (CDP Admin), **OWL** (tab trong Odoo) | |
-| AI | scikit-learn/LightGBM cho churn/CLV; LLM cho "tạo phân khúc bằng tiếng Việt" và tóm tắt hồ sơ khách | |
-| Triển khai | Docker Compose (MVP) → Kubernetes (khi scale) | |
+```
+ ┌──────────────── NGUỒN ────────────────┐
+ │ Web DMAG (JS SDK)  Odoo 17 (Bizapp)    │
+ │ Zalo OA webhook    Facebook Lead/Ads   │
+ └───┬───────────────┬───────────────┬────┘
+     │ track/identify │ outbox events │ webhooks
+     ▼                ▼  (HTTPS+HMAC) ▼
+ ┌──────────────────────────────────────────┐
+ │ Collector API (FastAPI) — xác thực, chuẩn hóa, gắn tenant_id │
+ └────────────────────┬─────────────────────┘
+                      ▼
+          Redpanda (1 node, Kafka API)
+          ┌───────────┴───────────┐
+          ▼                       ▼
+ ┌──────────────────┐   ┌─────────────────────┐
+ │ Identity service  │   │ ClickHouse           │
+ │ (identity graph,  │   │ event store, phân   │
+ │ merge/unmerge)    │   │ tích hành vi         │
+ └────────┬─────────┘   └──────────┬──────────┘
+          ▼                        ▼  dbt (traits, RFM, CLV, engagement)
+ ┌──────────────────────────────────────────┐
+ │ PostgreSQL: profile, account (phòng khám),│
+ │ traits, consent, segment membership       │
+ └────────┬─────────────────────────────────┘
+          ▼
+ ┌──────────────────────────────────────────┐
+ │ Segmentation + Activation                 │
+ │ → Odoo (segment → MA / CRM / tag)         │
+ │ → Facebook Custom Audiences + CAPI        │
+ │ → Zalo ZNS (trigger real-time)            │
+ │ → Webhook chung (cho khách hàng tương lai) │
+ └──────────────────────────────────────────┘
+  UI: CDP Admin (React) · tab "Customer 360" (OWL) trong Odoo
+```
 
-**Có thể tái sử dụng mã nguồn mở thay vì tự viết từ đầu**: RudderStack / Jitsu (thu thập sự kiện), Snowplow (tracking nâng cao), Dittofeed (journey/messaging), Apache Unomi hoặc Tracardi (tham khảo mô hình profile). Khuyến nghị **tự xây phần lõi** (identity resolution, profile, segmentation, connector Odoo) vì đó là phần đặc thù nghiệp vụ & dữ liệu Việt Nam, và **dùng lại** phần thu thập sự kiện & gửi tin.
+### 5.1. Đồng bộ Odoo → CDP
+
+**Cơ chế chính: outbox events từ module connector `dmag_cdp_connector`** (Bizapp hỗ trợ cài):
+
+- Hook vào các method nghiệp vụ (xác nhận đơn, thanh toán, ghi danh, hoàn thành bài học, chuyển stage lead, cập nhật `res.partner`…). Mỗi sự kiện được ghi vào bảng `cdp_outbox` **trong cùng transaction**: transaction rollback thì không phát sự kiện, commit thì chắc chắn không mất.
+- Một job nền (cron hoặc `queue_job` của OCA nếu Bizapp đã dùng) gửi theo lô qua HTTPS, ký HMAC, có retry + idempotency key. CDP tạm ngừng thì sự kiện xếp hàng trong Odoo, không mất.
+- Field custom của Bizapp: connector có **mapping cấu hình được** (chọn model/field nào gửi đi) để không phải sửa code khi Bizapp thêm field.
+
+**Cơ chế bổ trợ:**
+- **Backfill lần đầu** toàn bộ khách hàng, đơn hàng, ghi danh lịch sử qua JSON-RPC/XML-RPC hoặc export từ replica.
+- **Đối soát (reconciliation) hằng đêm**: so số lượng và checksum theo `write_date` để bắt các thay đổi đi ngoài ORM (SQL trực tiếp, script import).
+
+**Vì sao CDC (Debezium) không làm cơ chế chính:** CDC cần bật `wal_level=logical`, mở kết nối replication từ hạ tầng DMAG vào DB trên server Bizapp, và tạo *replication slot*. Nếu phía CDP dừng lâu, slot giữ lại WAL và **có thể làm đầy ổ đĩa, kéo sập Odoo**. Với hệ thống do bên thứ ba vận hành, rủi ro này không đáng so với lợi ích. Có thể xem xét lại sau nếu Bizapp đồng ý và có giám sát slot.
+
+### 5.2. Đồng bộ CDP → Odoo và phối hợp với Marketing Automation của Bizapp
+
+Nguyên tắc: **một hệ thống điều phối hành trình (orchestrator) cho mỗi kênh**, tránh hai hệ thống cùng gửi tin cho một khách.
+
+| Việc | Ai làm |
+|-----|-------|
+| Email / SMS / chuỗi chăm sóc dài ngày | **Odoo Marketing Automation** (đã có) |
+| Phân khúc, điểm số, thuộc tính hành vi | **CDP** đẩy vào Odoo |
+| Trigger real-time theo hành vi web (bỏ giỏ hàng, xem khóa nhiều lần) | CDP phát hiện → gọi Odoo (connector API hoặc trigger *On webhook* của automation rule) để MA chạy kịch bản, **hoặc** CDP gửi ZNS trực tiếp nếu MA chưa hỗ trợ Zalo |
+| Quảng cáo Facebook (audience, conversion) | **CDP** (Odoo không làm phần này tốt) |
+| Lead cho sales | CDP chấm điểm → tạo/cập nhật `crm.lead` + activity trong Odoo |
+
+Cụ thể trong Odoo, connector cung cấp:
+- Model `cdp.segment` và quan hệ thành viên với `res.partner`. **Cần khảo sát cách MA của Bizapp lọc đối tượng** (domain trên `res.partner`, mailing list hay model riêng) để chọn cách đẩy phân khúc mà MA dùng được ngay, không phải sửa MA.
+- Field `x_cdp_*` trên `res.partner`: CDP ID, RFM, CLV, engagement score, lead score, khóa gợi ý tiếp theo, ngày cập nhật.
+- Tab **Customer 360** trên form khách hàng (widget OWL gọi API CDP): timeline hành vi web/Zalo/học tập, phòng khám, điểm số.
+- Kết quả từ MA (gửi, mở, click, hủy đăng ký) chảy ngược về CDP qua outbox để hồ sơ đầy đủ.
+
+### 5.3. Web và Facebook: phần mang lại giá trị nhanh nhất
+
+- **JS SDK** trên web DMAG (tương thích Segment spec: `page`, `track`, `identify`), cookie first-party, gửi về domain của DMAG (vd. `t.dmag.vn`) để ít bị chặn.
+- Ghi nhận **UTM / fbclid / zalo click id** ở phiên đầu → gán nguồn cho đơn hàng → **báo cáo doanh thu theo chiến dịch Facebook** (attribution).
+- **Facebook Conversions API (server-side)**: CDP gửi `Purchase`, `Lead`, `InitiateCheckout` kèm dữ liệu băm SHA-256 và consent → tối ưu quảng cáo tốt hơn pixel (không bị chặn bởi iOS/adblock).
+- **Custom Audiences**: loại người đã mua khỏi quảng cáo khóa đó; lookalike từ nhóm CLV cao; retarget nhóm xem khóa nhưng chưa mua.
+
+### 5.4. Zalo
+
+- **Zalo OA**: nhận webhook (follow, tin nhắn), ghép Zalo user ID với SĐT khi người dùng chia sẻ số hoặc qua form có consent.
+- **ZNS**: gửi theo SĐT với template đã duyệt (xác nhận đơn, nhắc lịch học, nhắc học dở, nhắc bỏ giỏ hàng nếu template được duyệt cho mục đích này).
+- Nếu MA của Bizapp đã tích hợp Zalo thì CDP chỉ cung cấp trigger và phân khúc, không gửi trực tiếp.
+
+### 5.5. Identity resolution
+
+- **Chuẩn hóa SĐT** về `+84…`, xử lý đầu số 11 số cũ, loại SĐT rác/SĐT tổng đài phòng khám (một SĐT phòng khám gắn với nhiều người là chuyện thường gặp trong ngành này: **không được auto-merge theo SĐT dùng chung**).
+- **Email**: lowercase, xử lý alias Gmail.
+- **Thứ tự tin cậy**: tài khoản đăng nhập web = `partner_id` > số chứng chỉ hành nghề > email đã xác minh > SĐT cá nhân > Zalo ID > Facebook lead > cookie.
+- **Anonymous → known**: khi khách vô danh đăng nhập hoặc điền form, toàn bộ lịch sử duyệt web trước đó được gắn vào hồ sơ.
+- **Merge/unmerge có lịch sử**, giới hạn kích thước cụm. CDP **chỉ đề xuất** gộp partner trùng trong Odoo, con người duyệt.
+
+### 5.6. Thiết kế sẵn cho thương mại hóa (multi-tenant-ready)
+
+Làm cho DMAG trước, nhưng **không viết code chỉ chạy được cho DMAG**:
+
+- Mọi bảng/event có `tenant_id`. PostgreSQL dùng Row-Level Security, ClickHouse partition/filter theo tenant.
+- **Connector là plugin**: Odoo là connector đầu tiên. Sau này thêm connector cho phần mềm quản lý phòng khám, Haravan/Sapo, Google Sheets, webhook chung…
+- **Tracking plan và trait theo template ngành**: "Đào tạo" (DMAG), "Phòng khám nha khoa" (lịch hẹn, điều trị, tái khám, nhắc cạo vôi 6 tháng…).
+- Cấu hình (mapping field, luật ghép danh tính, phân khúc) lưu dạng dữ liệu, không hard-code.
+- **Lưu ý cho giai đoạn phòng khám**: dữ liệu bệnh nhân là **dữ liệu sức khỏe, thuộc nhóm dữ liệu cá nhân nhạy cảm** theo luật. Yêu cầu bảo vệ cao hơn hẳn (mã hóa, cô lập tenant, đánh giá tác động, lưu trữ trong nước). Không đưa vào MVP, nhưng kiến trúc phải chừa chỗ.
+
+Không làm ngay: billing, self-service onboarding, marketplace connector. Làm khi đã có khách hàng thứ hai.
+
+### 5.7. Tuân thủ Luật Bảo vệ dữ liệu cá nhân (91/2025/QH15)
+
+- Consent theo mục đích (marketing, quảng cáo, phân tích), lưu thời điểm, kênh, bằng chứng; banner/cookie consent trên web.
+- Hỗ trợ truy cập, chỉnh sửa, rút đồng ý, xóa dữ liệu. Lệnh xóa lan sang event store, Odoo và audience đã đẩy lên Facebook.
+- Chỉ gửi dữ liệu băm cho nền tảng quảng cáo, chỉ với khách đã đồng ý.
+- Phân quyền, audit log, mã hóa trường nhạy cảm. Lưu trữ tại Việt Nam.
+- Chuẩn bị hồ sơ đánh giá tác động xử lý dữ liệu cá nhân.
+
+> Phần pháp lý cần pháp chế/luật sư xác nhận. Tài liệu chỉ nêu yêu cầu kỹ thuật.
 
 ---
 
-## 7. Lộ trình triển khai
+## 6. Công nghệ (tinh gọn cho quy mô hiện tại)
+
+| Lớp | Đề xuất | Ghi chú |
+|----|--------|--------|
+| Backend | **Python 3.12 + FastAPI** | Cùng ngôn ngữ với Odoo, dễ phối hợp với Bizapp |
+| Hàng đợi sự kiện | **Redpanda 1 node** | API Kafka, sau này scale không phải viết lại |
+| Event store | **ClickHouse 1 node** | 150k hồ sơ, vài triệu–vài chục triệu event/tháng là dư sức |
+| Profile store | **PostgreSQL 16** | Hồ sơ, identity graph, consent, cấu hình, RLS cho multi-tenant |
+| Mô hình hóa | **dbt** (dbt-clickhouse) | RFM, CLV, engagement, attribution bằng SQL có test |
+| Lập lịch | **Dagster** (hoặc APScheduler ở MVP) | |
+| Web SDK | Thư viện mã nguồn mở tương thích Segment spec | Không tự viết SDK từ đầu |
+| Giao diện | **React + TypeScript**; **OWL** cho tab trong Odoo | |
+| AI | LightGBM/scikit-learn (lead score, gợi ý khóa, rời bỏ); LLM cho "tạo phân khúc bằng tiếng Việt" và tóm tắt hồ sơ cho sales | Giai đoạn 3 |
+| Hạ tầng | Docker Compose trên cloud tại VN, do DMAG làm chủ | Kubernetes khi có tenant thứ 2–3 |
+
+**Hạ tầng MVP ước tính**: 2 máy chủ, mỗi máy khoảng 8 vCPU / 16–32 GB RAM / SSD 500 GB:
+- (1) ClickHouse + Redpanda;
+- (2) PostgreSQL + API + workers + UI.
+
+Kèm backup sang object storage.
+
+---
+
+## 7. Use-case ưu tiên cho DMAG
+
+| # | Use-case | Dữ liệu cần | Kênh kích hoạt | KPI |
+|---|---------|------------|---------------|-----|
+| 1 | **Thu hồi giỏ hàng / checkout bỏ dở** | Web tracking + đơn Odoo | ZNS / email qua MA | % đơn thu hồi |
+| 2 | **Đo doanh thu theo chiến dịch Facebook** + gửi CAPI | UTM/fbclid + đơn đã thanh toán | Dashboard, Facebook CAPI | ROAS, CPA thực |
+| 3 | **Loại người đã mua khỏi quảng cáo; lookalike từ khách CLV cao** | Đơn hàng, CLV | Facebook Custom Audiences | Giảm chi phí quảng cáo lãng phí |
+| 4 | **Gợi ý khóa tiếp theo theo lộ trình** (cơ bản → nâng cao → hands-on) | Lịch sử ghi danh, hoàn thành | MA (email/Zalo) | Tỷ lệ mua lại, CLV |
+| 5 | **Kéo người học dở quay lại** | Tiến độ học | ZNS / email | % hoàn thành khóa |
+| 6 | **Lead score cho khóa offline/hands-on giá cao** → giao sales | Hành vi web + lịch sử mua + phòng khám | Odoo CRM (lead + activity) | Tỷ lệ chốt, thời gian phản hồi |
+| 7 | **Bán gói doanh nghiệp cho phòng khám** | Account view (nhiều nhân sự cùng phòng khám) | Odoo CRM | Doanh thu B2B |
+
+MVP nên chốt 1, 2, 3 (giá trị nhanh, dữ liệu sẵn), sau đó mở rộng 4–7.
+
+---
+
+## 8. Lộ trình triển khai
 
 | Giai đoạn | Thời gian (ước tính) | Phạm vi | Kết quả |
 |----------|-------------------|--------|---------|
-| **0. Khảo sát** | 2–3 tuần | Audit DB & customize của Bizapp, đánh giá chất lượng dữ liệu (trùng, SĐT sai), xác định use-case ưu tiên & KPI | Data map, danh sách bảng/field cần đồng bộ, backlog use-case |
-| **1. MVP** | 8–10 tuần | Connector Odoo (outbox + reverse ETL), CDC Debezium, identity resolution deterministic, profile store, RFM/CLV cơ bản, phân khúc batch, đẩy tag/mailing list về Odoo, tab Customer 360 | Marketing dùng được phân khúc từ dữ liệu Odoo; sales thấy hồ sơ 360 |
-| **2. Đa kênh** | 8–10 tuần | Web/App SDK, Zalo OA/ZNS, Facebook/Google/TikTok audiences, sàn TMĐT, consent management, ClickHouse event store | Hồ sơ hợp nhất online + offline; chạy chiến dịch đa kênh |
-| **3. Thông minh & real-time** | 8–12 tuần | Phân khúc real-time, journey orchestration, mô hình churn/next-best-product, LLM segment builder, dashboard | CDP hoàn chỉnh theo chuẩn |
+| **0. Khảo sát với Bizapp** | 2 tuần | Liệt kê model/field liên quan (website, eLearning, sale, CRM, MA custom, Zalo nếu có); MA lọc đối tượng thế nào; chất lượng dữ liệu khách; tracking plan; thỏa thuận phối hợp & sở hữu code | Data map, tracking plan, backlog |
+| **1. MVP** | 8–10 tuần | Connector Odoo (outbox + backfill + reverse sync), web SDK, identity (web ↔ partner ↔ SĐT/email), profile 360 + phòng khám, RFM/CLV, phân khúc batch, đẩy phân khúc vào MA, Facebook CAPI + Custom Audiences, consent | Use-case 1–3 chạy thật |
+| **2. Đa kênh & học tập** | 6–8 tuần | Zalo OA/ZNS, Facebook Lead Ads, engagement học tập, lead score → CRM, dashboard attribution, trigger real-time, tab Customer 360 | Use-case 4–7 |
+| **3. Thông minh & sản phẩm hóa** | 8–12 tuần | Gợi ý khóa/dự báo rời bỏ, LLM segment builder, hoàn thiện multi-tenant, connector thứ 2 (phần mềm phòng khám), pilot 1–2 phòng khám là khách DMAG | Bản thương mại đầu tiên |
 
-**Nhân sự gợi ý**: 1 Tech lead/kiến trúc sư, 2 backend (Python), 1 data engineer (ClickHouse/dbt), 1 frontend (React), 1 Odoo developer (phối hợp với Bizapp), 1 BA/PM, QA bán thời gian.
-
-**Hạ tầng MVP**: khoảng 3–4 máy chủ ảo (8 vCPU/32GB cho ClickHouse, 4 vCPU/16GB cho Postgres + API, 4 vCPU/16GB cho Redpanda + Debezium), có thể gộp ở giai đoạn đầu.
+**Nhân sự gợi ý (giai đoạn 1–2)**:
+- 1 tech lead (kiêm kiến trúc);
+- 2 backend Python (1 người kiêm data/dbt);
+- 1 frontend;
+- 1 Odoo developer phía Bizapp (bán thời gian, làm connector theo spec của team CDP);
+- 1 BA/PM nắm marketing DMAG.
 
 ---
 
-## 8. Rủi ro & cách giảm thiểu
+## 9. Rủi ro & cách giảm thiểu
 
 | Rủi ro | Giảm thiểu |
 |-------|-----------|
-| Không có quyền truy cập DB/code customize của Bizapp | Làm rõ ngay ở giai đoạn 0: quyền đọc DB (replica), quyền cài module connector, quy trình phối hợp khi Bizapp nâng cấp |
-| Odoo host trên hạ tầng không cho bật logical replication | Dự phòng: chỉ dùng outbox + `queue_job`, chấp nhận độ trễ vài giây–vài phút |
-| Dữ liệu khách trùng lặp/bẩn trong Odoo | Pipeline chuẩn hóa + báo cáo chất lượng dữ liệu; CDP đề xuất gộp, con người duyệt |
-| Ghép nhầm danh tính | Chỉ auto-merge bằng định danh mạnh, có unmerge, giới hạn kích thước cụm |
-| Phình phạm vi (scope creep) | Đi theo use-case có KPI (tỷ lệ quay lại, doanh thu từ chiến dịch), mỗi giai đoạn có tiêu chí nghiệm thu |
-| Nâng cấp Odoo 17 → 18/19 | Connector mỏng, ít override; CDC dựa trên bảng nên chỉ cần cập nhật mapping |
-| Rủi ro pháp lý về dữ liệu cá nhân | Thiết kế consent & xóa dữ liệu ngay từ MVP, không để "làm sau" |
+| Phụ thuộc Bizapp cho connector và mọi thay đổi Odoo | Connector mỏng, spec do team CDP viết, mapping cấu hình được; thỏa thuận SLA phối hợp |
+| **Nguồn gốc module Marketing Automation của Bizapp**: nếu được port từ mã nguồn Odoo Enterprise thì có rủi ro bản quyền (Enterprise dùng giấy phép OEEL) | Xác nhận với Bizapp là module tự phát triển. Điều này cũng quan trọng khi thương mại hóa vì CDP không nên phụ thuộc vào module này |
+| Sở hữu trí tuệ CDP khi bán ra ngoài | Code CDP thuộc DMAG/đơn vị phát triển; connector Odoo tách repo, ghi rõ trong hợp đồng với Bizapp |
+| Ghép nhầm danh tính do SĐT phòng khám dùng chung | Không auto-merge theo SĐT dùng chung, giới hạn cụm, có unmerge |
+| Dữ liệu khách trong Odoo trùng/bẩn | Pipeline chuẩn hóa + báo cáo chất lượng; CDP đề xuất gộp, con người duyệt |
+| Hai hệ thống cùng gửi tin cho một khách | Quy tắc "mỗi kênh một orchestrator" (mục 5.2), tần suất liên lạc tối đa (frequency cap) do CDP quản lý |
+| Phình phạm vi do muốn làm sản phẩm ngay | Multi-tenant-ready nhưng chỉ triển khai 1 tenant đến hết giai đoạn 2 |
+| Pháp lý dữ liệu cá nhân (đặc biệt dữ liệu bệnh nhân ở giai đoạn phòng khám) | Consent & xóa dữ liệu có ngay từ MVP; dữ liệu sức khỏe chỉ đưa vào sau khi có đánh giá tác động riêng |
 
 ---
 
-## 9. Các câu hỏi cần làm rõ để chốt thiết kế
+## 10. Câu hỏi còn mở (cần làm rõ ở giai đoạn 0)
 
-1. Quy mô: bao nhiêu khách hàng, bao nhiêu đơn/ngày, bao nhiêu cửa hàng/POS?
-2. Kênh hiện có: website/app riêng? Zalo OA? Fanpage? Sàn TMĐT nào? Call center?
-3. Odoo đang host ở đâu (on-premise / cloud VN / Bizapp quản lý)? Có quyền truy cập PostgreSQL và cài module không?
-4. Bizapp đã customize những phân hệ nào (loyalty, bảo hành, CSKH, POS…)? Có tài liệu/mã nguồn không?
-5. Use-case ưu tiên số 1: tăng mua lại? chăm sóc VIP? giảm rời bỏ? tối ưu quảng cáo?
-6. Đội ngũ triển khai: in-house, thuê ngoài, hay phối hợp với Bizapp?
-7. Yêu cầu hạ tầng: bắt buộc on-premise / lưu trữ trong nước?
-8. CDP phục vụ một doanh nghiệp hay định hướng thành sản phẩm bán cho nhiều khách hàng Odoo (multi-tenant)? — câu này ảnh hưởng lớn đến kiến trúc.
+1. Web bán khóa học của DMAG là **Odoo Website/eLearning** hay nền tảng khác (WordPress, LMS riêng)? Thanh toán qua cổng nào? Phần này quyết định cách gắn tracking và lấy dữ liệu học tập.
+2. Marketing Automation của Bizapp hỗ trợ những kênh nào (email, SMS, Zalo ZNS)? Chọn đối tượng bằng domain filter, mailing list hay model riêng? Có trigger từ webhook không?
+3. DMAG đã có Zalo OA xác thực và template ZNS chưa? Đang dùng Facebook Pixel/CAPI chưa?
+4. Lượng truy cập web hằng tháng (để ước lượng event) và số đơn/tháng?
+5. DMAG có thu thập số chứng chỉ hành nghề / nơi làm việc của người học không? Khóa học có được công nhận giờ đào tạo liên tục không?
+6. Đội phát triển CDP: DMAG tự tuyển, thuê ngoài, hay Bizapp làm? Ảnh hưởng trực tiếp đến sở hữu code khi thương mại hóa.
 
 ---
 
-## 10. Bước tiếp theo đề xuất
+## 11. Bước tiếp theo
 
-1. Trả lời các câu hỏi ở mục 9.
-2. Chạy giai đoạn 0 (khảo sát dữ liệu & customize Bizapp).
-3. Dựng khung repo: `cdp-platform/` (FastAPI + Postgres + ClickHouse + Redpanda, docker-compose) và `odoo_addons/bizapp_cdp_connector/` (module Odoo 17).
-4. Chọn 1–2 use-case cho MVP và định nghĩa KPI nghiệm thu.
+1. Gửi tài liệu này + danh sách câu hỏi mục 10 cho Bizapp, tổ chức 1 buổi workshop kỹ thuật.
+2. Dựng khung repo:
+   - `platform/`: FastAPI + PostgreSQL + ClickHouse + Redpanda, docker-compose;
+   - `connectors/odoo/dmag_cdp_connector/`: module Odoo 17;
+   - `sdk/web/`;
+   - `docs/`: tracking plan, data contract với Bizapp.
+3. Viết **data contract** (định dạng sự kiện outbox, API reverse sync) để Bizapp làm connector song song với team CDP.
